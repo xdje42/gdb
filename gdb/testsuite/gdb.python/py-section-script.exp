@@ -39,7 +39,7 @@ set remote_python_file [gdb_remote_download host \
 set quoted_name "\"$remote_python_file\""
 
 if {[build_executable $testfile.exp $testfile $srcfile \
-	 [list debug additional_flags=-DSCRIPT_FILE=$quoted_name]] == -1} {
+	[list debug "additional_flags=-I${srcdir}/../../include -DSCRIPT_FILE=$quoted_name"]] == -1} {
     return -1
 }
 

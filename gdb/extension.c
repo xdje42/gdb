@@ -28,6 +28,7 @@
 #include "observer.h"
 #include "cli/cli-script.h"
 #include "python/python.h"
+#include "guile/guile.h"
 
 /* Iterate over all external extension languages, regardless of whether the
    support has been compiled in or not.
@@ -98,6 +99,7 @@ static const struct extension_language_defn * const extension_languages[] =
 {
   /* To preserve existing behaviour, python should always appear first.  */
   &extension_language_python,
+  &extension_language_guile,
   NULL
 };
 

@@ -15,13 +15,16 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
+#include "symcat.h"
+#include "gdb/section-scripts.h"
+
 /* Put the path to the pretty-printer script in .debug_gdb_scripts so
    gdb will automagically loaded it.  */
 
 #define DEFINE_GDB_SCRIPT(script_name) \
   asm("\
 .pushsection \".debug_gdb_scripts\", \"MS\",@progbits,1\n\
-.byte 1\n\
+.byte " XSTRING (SECTION_SCRIPT_ID_PYTHON_FILE) "\n\
 .asciz \"" script_name "\"\n\
 .popsection \n\
 ");
