@@ -53,7 +53,7 @@ static int maybe_add_script (struct auto_load_pspace_info *pspace_info,
 			     int loaded, const char *name,
 			     const char *full_path,
 			     const struct extension_language_defn *language);
-
+ 
 static int unsupported_script_warning_print (struct auto_load_pspace_info *);
 
 static int script_not_found_warning_print (struct auto_load_pspace_info *);
