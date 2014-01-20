@@ -1,6 +1,6 @@
 /* GDB/Scheme pretty-printing.
 
-   Copyright (C) 2008-2013 Free Software Foundation, Inc.
+   Copyright (C) 2008-2014 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -118,7 +118,7 @@ static const char pretty_printer_list_name[] = "*pretty-printers*";
 static SCM pretty_printer_list_var;
 
 /* gdb:pp-type-error.  */
-static SCM gdbscm_pp_type_error_symbol;
+static SCM pp_type_error_symbol;
 
 /* Pretty-printer display hints are specified by strings.  */
 static SCM ppscm_map_string;
@@ -200,39 +200,21 @@ gdbscm_pretty_printer_p (SCM scm)
   return scm_from_bool (ppscm_is_pretty_printer (scm));
 }
 
-/* Returns the <gdb:pretty-printer> object in SCM or #f if SCM is not a
-   <gdb:pretty-printer> object.
-   Returns a <gdb:exception> object if there was a problem during the
-   conversion.  */
-
-static SCM
-ppscm_scm_to_pretty_printer_gsmob (SCM scm)
-{
-  return gdbscm_scm_to_gsmob_safe (scm, pretty_printer_smob_tag);
-}
-
 /* Returns the <gdb:pretty-printer> object in SELF.
-   Throws an exception if SELF is not a <gdb:pretty-printer> object
-   (after passing it through *scm->smob*).  */
+   Throws an exception if SELF is not a <gdb:pretty-printer> object.  */
 
 static SCM
 ppscm_get_pretty_printer_arg_unsafe (SCM self, int arg_pos,
 				     const char *func_name)
 {
-  SCM pp_scm = ppscm_scm_to_pretty_printer_gsmob (self);
-
-  if (gdbscm_is_exception (pp_scm))
-    gdbscm_throw (pp_scm);
-
-  SCM_ASSERT_TYPE (ppscm_is_pretty_printer (pp_scm), self, arg_pos, func_name,
+  SCM_ASSERT_TYPE (ppscm_is_pretty_printer (self), self, arg_pos, func_name,
 		   pretty_printer_smob_name);
 
-  return pp_scm;
+  return self;
 }
 
 /* Returns a pointer to the pretty-printer smob of SELF.
-   Throws an exception if SELF is not a <gdb:pretty-printer> object
-   (after passing it through *scm->smob*).  */
+   Throws an exception if SELF is not a <gdb:pretty-printer> object.  */
 
 static pretty_printer_smob *
 ppscm_get_pretty_printer_smob_arg_unsafe (SCM self, int arg_pos,
@@ -348,17 +330,6 @@ gdbscm_pretty_printer_worker_p (SCM scm)
 {
   return scm_from_bool (ppscm_is_pretty_printer_worker (scm));
 }
-
-/* Returns the <gdb:pretty-printer-worker> object in SCM or #f if SCM is not a
-   <gdb:pretty-printer-worker> object.
-   Returns a <gdb:exception> object if there was a problem during the
-   conversion.  */
-
-static SCM
-ppscm_scm_to_pretty_printer_worker_gsmob (SCM scm)
-{
-  return gdbscm_scm_to_gsmob_safe (scm, pretty_printer_worker_smob_tag);
-}
 
 /* Helper function to create a <gdb:exception> object indicating that the
    type of some value returned from a pretty-printer is invalid.  */
@@ -369,7 +340,7 @@ ppscm_make_pp_type_error_exception (const char *message, SCM object)
   char *msg = xstrprintf ("%s: ~S", message);
   struct cleanup *cleanup = make_cleanup (xfree, msg);
   SCM exception
-    = gdbscm_make_error (gdbscm_pp_type_error_symbol,
+    = gdbscm_make_error (pp_type_error_symbol,
 			 NULL /* func */, msg,
 			 scm_list_1 (object), scm_list_1 (object));
 
@@ -388,7 +359,7 @@ ppscm_print_pp_type_error (const char *message, SCM object)
 {
   SCM exception = ppscm_make_pp_type_error_exception (message, object);
 
-  gdbscm_print_exception (SCM_BOOL_F, exception);
+  gdbscm_print_gdb_exception (SCM_BOOL_F, exception);
 }
 
 /* Helper function for find_pretty_printer which iterates over a list,
@@ -417,19 +388,16 @@ ppscm_search_pp_list (SCM list, SCM value)
 
   for ( ; scm_is_pair (list); list = scm_cdr (list))
     {
-      SCM maybe_matcher = scm_car (list);
-      SCM matcher, maybe_worker;
+      SCM matcher = scm_car (list);
+      SCM worker;
       pretty_printer_smob *pp_smob;
       int rc;
 
-      matcher = ppscm_scm_to_pretty_printer_gsmob (maybe_matcher);
-      if (gdbscm_is_exception (matcher))
-	return matcher;
       if (!ppscm_is_pretty_printer (matcher))
 	{
 	  return ppscm_make_pp_type_error_exception
 	    (_("pretty-printer list contains non-pretty-printer object"),
-	     maybe_matcher);
+	     matcher);
 	}
 
       pp_smob = (pretty_printer_smob *) SCM_SMOB_DATA (matcher);
@@ -445,22 +413,16 @@ ppscm_search_pp_list (SCM list, SCM value)
 	     pp_smob->lookup);
 	}
 
-      maybe_worker = gdbscm_safe_call_2 (pp_smob->lookup, matcher,
-					 value, gdbscm_memory_error_p);
-      if (!gdbscm_is_false (maybe_worker))
+      worker = gdbscm_safe_call_2 (pp_smob->lookup, matcher,
+				   value, gdbscm_memory_error_p);
+      if (!gdbscm_is_false (worker))
 	{
-	  SCM worker;
-
-	  if (gdbscm_is_exception (maybe_worker))
-	    return maybe_worker;
-	  worker = ppscm_scm_to_pretty_printer_worker_gsmob (maybe_worker);
-	  if (gdbscm_is_true (worker))
-	    {
-	      /* Note: worker could be a <gdb:exception>.  */
-	      return worker;
-	    }
+	  if (gdbscm_is_exception (worker))
+	    return worker;
+	  if (ppscm_is_pretty_printer_worker (worker))
+	    return worker;
 	  return ppscm_make_pp_type_error_exception
-	    (_("invalid result from pretty-printer lookup"), maybe_worker);
+	    (_("invalid result from pretty-printer lookup"), worker);
 	}
     }
 
@@ -583,7 +545,6 @@ ppscm_pretty_print_one_value (SCM printer, struct value **out_value,
   TRY_CATCH (except, RETURN_MASK_ALL)
     {
       int rc;
-      SCM v_scm;
       pretty_printer_worker_smob *w_smob
 	= (pretty_printer_worker_smob *) SCM_SMOB_DATA (printer);
 
@@ -594,24 +555,18 @@ ppscm_pretty_print_one_value (SCM printer, struct value **out_value,
       else if (scm_is_string (result)
 	       || lsscm_is_lazy_string (result))
 	; /* Done.  */
-      else if (vlscm_is_value (v_scm = vlscm_scm_to_value_gsmob (result)))
+      else if (vlscm_is_value (result))
 	{
 	  SCM except_scm;
 
 	  *out_value
 	    = vlscm_convert_value_from_scheme (FUNC_NAME, GDBSCM_ARG_NONE,
-					       v_scm, &except_scm,
+					       result, &except_scm,
 					       gdbarch, language);
 	  if (*out_value != NULL)
 	    result = SCM_BOOL_T;
 	  else
 	    result = except_scm;
-	}
-      else if (gdbscm_is_exception (v_scm))
-	{
-	  /* An exception occurred trying to convert RESULT to a <gdb:value>
-	     object.  */
-	  result = v_scm;
 	}
       else if (gdbscm_is_exception (result))
 	; /* Done.  */
@@ -664,7 +619,7 @@ ppscm_get_display_hint_enum (SCM printer)
   return HINT_ERROR;
 }
 
-/* A wrapper for gdbscm_print_exception that ignores memory errors.
+/* A wrapper for gdbscm_print_gdb_exception that ignores memory errors.
    EXCEPTION is a <gdb:exception> object.  */
 
 static void
@@ -694,7 +649,7 @@ ppscm_print_exception_unless_memory_error (SCM exception,
       do_cleanups (cleanup);
     }
   else
-    gdbscm_print_exception (SCM_BOOL_F, exception);
+    gdbscm_print_gdb_exception (SCM_BOOL_F, exception);
 }
 
 /* Helper for gdbscm_apply_val_pretty_printer which calls to_string and
@@ -708,7 +663,7 @@ ppscm_print_string_repr (SCM printer, enum display_hint hint,
 			 const struct language_defn *language)
 {
   struct value *replacement = NULL;
-  SCM str_scm, ls_scm;
+  SCM str_scm;
   enum string_repr_result result = STRING_REPR_ERROR;
 
   str_scm = ppscm_pretty_print_one_value (printer, &replacement,
@@ -759,21 +714,13 @@ ppscm_print_string_repr (SCM printer, enum display_hint hint,
       result = STRING_REPR_OK;
       do_cleanups (cleanup);
     }
-  else if (lsscm_is_lazy_string (ls_scm
-				 = (lsscm_scm_to_lazy_string_gsmob (str_scm))))
+  else if (lsscm_is_lazy_string (str_scm))
     {
       struct value_print_options local_opts = *options;
 
       local_opts.addressprint = 0;
       lsscm_val_print_lazy_string (str_scm, stream, &local_opts);
       result = STRING_REPR_OK;
-    }
-  else if (gdbscm_is_exception (ls_scm))
-    {
-      /* An exception occurred trying to convert STR_SCM to a <gdb:lazy-string>
-	 object.  */
-      ppscm_print_exception_unless_memory_error (ls_scm, stream);
-      result = STRING_REPR_ERROR;
     }
   else
     {
@@ -834,7 +781,6 @@ ppscm_print_children (SCM printer, enum display_hint hint,
      This simplifies things because there's no language means of creating
      iterators, and it's the printer object that knows how it will want its
      children iterated over.  */
-  /* TODO: pass children through *scm->smob*.  */
   if (!itscm_is_iterator (children))
     {
       ppscm_print_pp_type_error
@@ -860,7 +806,7 @@ ppscm_print_children (SCM printer, enum display_hint hint,
   for (i = 0; i < options->print_max; ++i)
     {
       int rc;
-      SCM scm_name, v_scm, ls_scm;
+      SCM scm_name, v_scm;
       char *name;
       SCM item = itscm_safe_call_next_x (iter, gdbscm_memory_error_p);
       struct cleanup *inner_cleanup = make_cleanup (null_cleanup, NULL);
@@ -870,7 +816,7 @@ ppscm_print_children (SCM printer, enum display_hint hint,
 	  ppscm_print_exception_unless_memory_error (item, stream);
 	  break;
 	}
-      if (gdbscm_is_false (item))
+      if (itscm_is_end_of_iteration (item))
 	{
 	  /* Set a flag so we can know whether we printed all the
 	     available elements.  */
@@ -881,7 +827,8 @@ ppscm_print_children (SCM printer, enum display_hint hint,
       if (! scm_is_pair (item))
 	{
 	  ppscm_print_pp_type_error
-	    (_("result of pretty-printer children iterator is not a pair"),
+	    (_("result of pretty-printer children iterator is not a pair"
+	       " or (end-of-iteration)"),
 	     item);
 	  continue;
 	}
@@ -950,18 +897,12 @@ ppscm_print_children (SCM printer, enum display_hint hint,
 	  fputs_filtered (" = ", stream);
 	}
 
-      ls_scm = lsscm_scm_to_lazy_string_gsmob (v_scm);
-      if (lsscm_is_lazy_string (ls_scm))
+      if (lsscm_is_lazy_string (v_scm))
 	{
 	  struct value_print_options local_opts = *options;
 
 	  local_opts.addressprint = 0;
-	  lsscm_val_print_lazy_string (ls_scm, stream, &local_opts);
-	}
-      else if (gdbscm_is_exception (ls_scm))
-	{
-	  ppscm_print_exception_unless_memory_error (ls_scm, stream);
-	  break;
+	  lsscm_val_print_lazy_string (v_scm, stream, &local_opts);
 	}
       else if (scm_is_string (v_scm))
 	{
@@ -1189,8 +1130,7 @@ gdbscm_initialize_pretty_printers (void)
 			      pretty_printer_list_name);
   gdb_assert (!gdbscm_is_false (pretty_printer_list_var));
 
-  gdbscm_pp_type_error_symbol
-    = gdbscm_symbol_from_c_string ("gdb:pp-type-error");
+  pp_type_error_symbol = scm_from_latin1_symbol ("gdb:pp-type-error");
 
   ppscm_map_string = scm_from_latin1_string ("map");
   ppscm_array_string = scm_from_latin1_string ("array");

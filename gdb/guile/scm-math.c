@@ -1,6 +1,6 @@
 /* GDB/Scheme support for math operations on values.
 
-   Copyright (C) 2008-2013 Free Software Foundation, Inc.
+   Copyright (C) 2008-2014 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -755,10 +755,7 @@ vlscm_convert_typed_value_from_scheme (const char *func_name,
 
   TRY_CATCH (except, RETURN_MASK_ALL)
     {
-      SCM scm;
-
-      scm = vlscm_scm_to_value_gsmob (obj);
-      if (vlscm_is_value (scm))
+      if (vlscm_is_value (obj))
 	{
 	  if (type != NULL)
 	    {
@@ -768,12 +765,7 @@ vlscm_convert_typed_value_from_scheme (const char *func_name,
 	      value = NULL;
 	    }
 	  else
-	    value = value_copy (vlscm_scm_to_value (scm));
-	}
-      else if (gdbscm_is_exception (scm))
-	{
-	  except_scm = scm;
-	  value = NULL;
+	    value = value_copy (vlscm_scm_to_value (obj));
 	}
       else if (gdbscm_is_true (scm_bytevector_p (obj)))
 	{
@@ -827,9 +819,10 @@ vlscm_convert_typed_value_from_scheme (const char *func_name,
 	    }
 	  else
 	    {
-	      /* TODO: Provide option to select non-strict conversion?  */
+	      /* TODO: Provide option to specify conversion strategy.  */
 	      s = gdbscm_scm_to_string (obj, &len,
-					target_charset (gdbarch), 1 /*strict*/,
+					target_charset (gdbarch),
+					0 /*non-strict*/,
 					&except_scm);
 	      if (s != NULL)
 		{
@@ -844,9 +837,7 @@ vlscm_convert_typed_value_from_scheme (const char *func_name,
 		value = NULL;
 	    }
 	}
-      /* Note: scm is assigned to here.  */
-      else if (lsscm_is_lazy_string (scm
-				     = lsscm_scm_to_lazy_string_gsmob (obj)))
+      else if (lsscm_is_lazy_string (obj))
 	{
 	  if (type != NULL)
 	    {
@@ -857,17 +848,10 @@ vlscm_convert_typed_value_from_scheme (const char *func_name,
 	    }
 	  else
 	    {
-	      value = lsscm_safe_lazy_string_to_value (scm, obj_arg_pos,
+	      value = lsscm_safe_lazy_string_to_value (obj, obj_arg_pos,
 						       func_name,
 						       &except_scm);
 	    }
-	}
-      /* This catches an exception returned from the call to
-	 lsscm_scm_to_lazy_string_gsmob.  */
-      else if (gdbscm_is_exception (scm))
-	{
-	  except_scm = scm;
-	  value = NULL;
 	}
       else /* OBJ isn't anything we support.  */
 	{

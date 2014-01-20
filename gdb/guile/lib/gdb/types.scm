@@ -1,5 +1,5 @@
 ;; Type utilities.
-;; Copyright (C) 2010-2013 Free Software Foundation, Inc.
+;; Copyright (C) 2010-2014 Free Software Foundation, Inc.
 ;;
 ;; This program is free software; you can redistribute it and/or modify
 ;; it under the terms of the GNU General Public License as published by
@@ -17,7 +17,7 @@
 (define-module (gdb types)
   #:use-module (gdb)
   #:use-module (gdb init)
-  #:use-module (gdb experimental))
+  #:use-module (gdb iterator))
 
 (define-public (type-has-field-deep? type field-name)
   "Return #t if the type, including baseclasses, has the specified field.
@@ -39,10 +39,10 @@
 				   ;; Not a baseclass, search ends now.
 				   ;; Return #:end to end search.
 				   #:end))))
-      (let ((search-baseclasses (lambda (type)
-				  (iterator-until find-in-baseclass
-						  (make-field-iterator type)
-						  #f))))
+      (let ((search-baseclasses
+	     (lambda (type)
+	       (iterator-until find-in-baseclass
+			       (make-field-iterator type)))))
 	(or (type-has-field? type field-name)
 	    (not (eq? (search-baseclasses type) #:end))))))
 

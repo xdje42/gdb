@@ -1,6 +1,6 @@
 /* General utility routines for GDB/Scheme code.
 
-   Copyright (C) 2013 Free Software Foundation, Inc.
+   Copyright (C) 2014 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -566,16 +566,6 @@ ULONGEST
 gdbscm_scm_to_ulongest (SCM u)
 {
   return scm_to_uint64 (u);
-}
-
-/* Return an SCM symbol for SYMBOL.
-   Note: It's ok to call scm_from_latin1_symbol directly.
-   This function is in part for documentation.  */
-
-SCM
-gdbscm_symbol_from_c_string (const char *symbol)
-{
-  return scm_from_latin1_symbol (symbol);
 }
 
 /* Same as scm_dynwind_free, but uses xfree.  */

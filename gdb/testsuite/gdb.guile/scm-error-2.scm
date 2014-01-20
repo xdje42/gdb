@@ -1,4 +1,4 @@
-;; Copyright (C) 2010-2013 Free Software Foundation, Inc.
+;; Copyright (C) 2014 Free Software Foundation, Inc.
 ;;
 ;; This program is free software; you can redistribute it and/or modify
 ;; it under the terms of the GNU General Public License as published by
@@ -15,5 +15,16 @@
 
 (use-modules (gdb))
 
-;; An intentional error to test error handling when loading a file.
-(define foo (+ 42 #f))
+;; Create a set of functions to call, with the last one having an error,
+;; so we can test backtrace printing.
+
+(define foo #f)
+
+(define (top-func x)
+  (+ (middle-func x) 1))
+
+(define (middle-func x)
+  (+ (bottom-func x) 1))
+
+(define (bottom-func x)
+  (+ x foo))

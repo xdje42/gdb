@@ -1,6 +1,6 @@
 /* Scheme interface to architecture.
 
-   Copyright (C) 2013 Free Software Foundation, Inc.
+   Copyright (C) 2014 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -77,22 +77,6 @@ arscm_print_arch_smob (SCM self, SCM port, scm_print_state *pstate)
   return 1;
 }
 
-/* The smob "equalp" function for <gdb:arch>.  */
-
-static SCM
-arscm_equal_p_arch_smob (SCM a1, SCM a2)
-{
-  const arch_smob *a1_smob = (arch_smob *) SCM_SMOB_DATA (a1);
-  struct gdbarch *a1_gdbarch = a1_smob->gdbarch;
-  const arch_smob *a2_smob = (arch_smob *) SCM_SMOB_DATA (a2);
-  struct gdbarch *a2_gdbarch = a2_smob->gdbarch;
-
-  if (strcmp (gdbarch_bfd_arch_info (a1_gdbarch)->printable_name,
-	      gdbarch_bfd_arch_info (a2_gdbarch)->printable_name) == 0)
-    return SCM_BOOL_T;
-  return SCM_BOOL_F;
-}
-
 /* Low level routine to create a <gdb:arch> object for GDBARCH.  */
 
 static SCM
@@ -139,18 +123,7 @@ gdbscm_arch_p (SCM scm)
 static void *
 arscm_object_data_init (struct gdbarch *gdbarch)
 {
-  SCM arch_smob_scm = arscm_make_arch_smob (gdbarch);
-  SCM arch_scm;
-
-  /* Pass the smob through *smob->scm*.  */
-  arch_scm = gdbscm_scm_from_gsmob_safe (arch_smob_scm);
-
-  /* If that failed tell the user and fallback to using the smob.  */
-  if (gdbscm_is_exception (arch_scm))
-    {
-      gdbscm_print_exception (SCM_BOOL_F, arch_scm);
-      arch_scm = arch_smob_scm;
-    }
+  SCM arch_scm = arscm_make_arch_smob (gdbarch);
 
   /* This object lasts the duration of the GDB session, so there is no
      call to scm_gc_unprotect_object for it.  */
@@ -159,8 +132,7 @@ arscm_object_data_init (struct gdbarch *gdbarch)
   return (void *) arch_scm;
 }
 
-/* Return the <gdb:arch> object, passed through *smob->scm*,
-   corresponding to GDBARCH.
+/* Return the <gdb:arch> object corresponding to GDBARCH.
    The object is cached in GDBARCH so this is simple.  */
 
 SCM
@@ -171,34 +143,20 @@ arscm_scm_from_arch (struct gdbarch *gdbarch)
   return a_scm;
 }
 
-/* Return the <gdb:arch> object in SCM or #f if not a <gdb:arch> object.
-   Throws an exception if SELF is not a <gdb:arch> object
-   (after passing it through *scm->smob*).  */
-
-static SCM
-arscm_scm_to_arch_gsmob_unsafe (SCM scm)
-{
-  return gdbscm_scm_to_gsmob_unsafe (scm, arch_smob_tag);
-}
-
 /* Return the <gdb:arch> smob in SELF.
-   Throws an exception if SELF is not a <gdb:arch> object
-   (after passing it through *scm->smob*).  */
+   Throws an exception if SELF is not a <gdb:arch> object.  */
 
 static SCM
 arscm_get_arch_arg_unsafe (SCM self, int arg_pos, const char *func_name)
 {
-  SCM a_scm = arscm_scm_to_arch_gsmob_unsafe (self);
-
-  SCM_ASSERT_TYPE (arscm_is_arch (a_scm), self, arg_pos, func_name,
+  SCM_ASSERT_TYPE (arscm_is_arch (self), self, arg_pos, func_name,
 		   arch_smob_name);
 
-  return a_scm;
+  return self;
 }
 
 /* Return a pointer to the arch smob of SELF.
-   Throws an exception if SELF is not a <gdb:arch> object
-   (after passing it through *scm->smob*).  */
+   Throws an exception if SELF is not a <gdb:arch> object.  */
 
 arch_smob *
 arscm_get_arch_smob_arg_unsafe (SCM self, int arg_pos, const char *func_name)
@@ -288,7 +246,7 @@ gdbscm_arch_void_type (SCM self)
   struct type *type
     = gdbscm_arch_builtin_type (self, FUNC_NAME)->builtin_void;
 
-  return tyscm_scm_from_type_unsafe (type);
+  return tyscm_scm_from_type (type);
 }
 
 /* (arch-char-type <gdb:arch>) -> <gdb:type> */
@@ -299,7 +257,7 @@ gdbscm_arch_char_type (SCM self)
   struct type *type
     = gdbscm_arch_builtin_type (self, FUNC_NAME)->builtin_char;
 
-  return tyscm_scm_from_type_unsafe (type);
+  return tyscm_scm_from_type (type);
 }
 
 /* (arch-short-type <gdb:arch>) -> <gdb:type> */
@@ -310,7 +268,7 @@ gdbscm_arch_short_type (SCM self)
   struct type *type
     = gdbscm_arch_builtin_type (self, FUNC_NAME)->builtin_short;
 
-  return tyscm_scm_from_type_unsafe (type);
+  return tyscm_scm_from_type (type);
 }
 
 /* (arch-int-type <gdb:arch>) -> <gdb:type> */
@@ -321,7 +279,7 @@ gdbscm_arch_int_type (SCM self)
   struct type *type
     = gdbscm_arch_builtin_type (self, FUNC_NAME)->builtin_int;
 
-  return tyscm_scm_from_type_unsafe (type);
+  return tyscm_scm_from_type (type);
 }
 
 /* (arch-long-type <gdb:arch>) -> <gdb:type> */
@@ -332,7 +290,7 @@ gdbscm_arch_long_type (SCM self)
   struct type *type
     = gdbscm_arch_builtin_type (self, FUNC_NAME)->builtin_long;
 
-  return tyscm_scm_from_type_unsafe (type);
+  return tyscm_scm_from_type (type);
 }
 
 /* (arch-schar-type <gdb:arch>) -> <gdb:type> */
@@ -343,7 +301,7 @@ gdbscm_arch_schar_type (SCM self)
   struct type *type
     = gdbscm_arch_builtin_type (self, FUNC_NAME)->builtin_signed_char;
 
-  return tyscm_scm_from_type_unsafe (type);
+  return tyscm_scm_from_type (type);
 }
 
 /* (arch-uchar-type <gdb:arch>) -> <gdb:type> */
@@ -354,7 +312,7 @@ gdbscm_arch_uchar_type (SCM self)
   struct type *type
     = gdbscm_arch_builtin_type (self, FUNC_NAME)->builtin_unsigned_char;
 
-  return tyscm_scm_from_type_unsafe (type);
+  return tyscm_scm_from_type (type);
 }
 
 /* (arch-ushort-type <gdb:arch>) -> <gdb:type> */
@@ -365,7 +323,7 @@ gdbscm_arch_ushort_type (SCM self)
   struct type *type
     = gdbscm_arch_builtin_type (self, FUNC_NAME)->builtin_unsigned_short;
 
-  return tyscm_scm_from_type_unsafe (type);
+  return tyscm_scm_from_type (type);
 }
 
 /* (arch-uint-type <gdb:arch>) -> <gdb:type> */
@@ -376,7 +334,7 @@ gdbscm_arch_uint_type (SCM self)
   struct type *type
     = gdbscm_arch_builtin_type (self, FUNC_NAME)->builtin_unsigned_int;
 
-  return tyscm_scm_from_type_unsafe (type);
+  return tyscm_scm_from_type (type);
 }
 
 /* (arch-ulong-type <gdb:arch>) -> <gdb:type> */
@@ -387,7 +345,7 @@ gdbscm_arch_ulong_type (SCM self)
   struct type *type
     = gdbscm_arch_builtin_type (self, FUNC_NAME)->builtin_unsigned_long;
 
-  return tyscm_scm_from_type_unsafe (type);
+  return tyscm_scm_from_type (type);
 }
 
 /* (arch-float-type <gdb:arch>) -> <gdb:type> */
@@ -398,7 +356,7 @@ gdbscm_arch_float_type (SCM self)
   struct type *type
     = gdbscm_arch_builtin_type (self, FUNC_NAME)->builtin_float;
 
-  return tyscm_scm_from_type_unsafe (type);
+  return tyscm_scm_from_type (type);
 }
 
 /* (arch-double-type <gdb:arch>) -> <gdb:type> */
@@ -409,7 +367,7 @@ gdbscm_arch_double_type (SCM self)
   struct type *type
     = gdbscm_arch_builtin_type (self, FUNC_NAME)->builtin_double;
 
-  return tyscm_scm_from_type_unsafe (type);
+  return tyscm_scm_from_type (type);
 }
 
 /* (arch-longdouble-type <gdb:arch>) -> <gdb:type> */
@@ -420,7 +378,7 @@ gdbscm_arch_longdouble_type (SCM self)
   struct type *type
     = gdbscm_arch_builtin_type (self, FUNC_NAME)->builtin_long_double;
 
-  return tyscm_scm_from_type_unsafe (type);
+  return tyscm_scm_from_type (type);
 }
 
 /* (arch-bool-type <gdb:arch>) -> <gdb:type> */
@@ -431,7 +389,7 @@ gdbscm_arch_bool_type (SCM self)
   struct type *type
     = gdbscm_arch_builtin_type (self, FUNC_NAME)->builtin_bool;
 
-  return tyscm_scm_from_type_unsafe (type);
+  return tyscm_scm_from_type (type);
 }
 
 /* (arch-longlong-type <gdb:arch>) -> <gdb:type> */
@@ -442,7 +400,7 @@ gdbscm_arch_longlong_type (SCM self)
   struct type *type
     = gdbscm_arch_builtin_type (self, FUNC_NAME)->builtin_long_long;
 
-  return tyscm_scm_from_type_unsafe (type);
+  return tyscm_scm_from_type (type);
 }
 
 /* (arch-ulonglong-type <gdb:arch>) -> <gdb:type> */
@@ -453,7 +411,7 @@ gdbscm_arch_ulonglong_type (SCM self)
   struct type *type
     = gdbscm_arch_builtin_type (self, FUNC_NAME)->builtin_unsigned_long_long;
 
-  return tyscm_scm_from_type_unsafe (type);
+  return tyscm_scm_from_type (type);
 }
 
 /* (arch-int8-type <gdb:arch>) -> <gdb:type> */
@@ -464,7 +422,7 @@ gdbscm_arch_int8_type (SCM self)
   struct type *type
     = gdbscm_arch_builtin_type (self, FUNC_NAME)->builtin_int8;
 
-  return tyscm_scm_from_type_unsafe (type);
+  return tyscm_scm_from_type (type);
 }
 
 /* (arch-uint8-type <gdb:arch>) -> <gdb:type> */
@@ -475,7 +433,7 @@ gdbscm_arch_uint8_type (SCM self)
   struct type *type
     = gdbscm_arch_builtin_type (self, FUNC_NAME)->builtin_uint8;
 
-  return tyscm_scm_from_type_unsafe (type);
+  return tyscm_scm_from_type (type);
 }
 
 /* (arch-int16-type <gdb:arch>) -> <gdb:type> */
@@ -486,7 +444,7 @@ gdbscm_arch_int16_type (SCM self)
   struct type *type
     = gdbscm_arch_builtin_type (self, FUNC_NAME)->builtin_int16;
 
-  return tyscm_scm_from_type_unsafe (type);
+  return tyscm_scm_from_type (type);
 }
 
 /* (arch-uint16-type <gdb:arch>) -> <gdb:type> */
@@ -497,7 +455,7 @@ gdbscm_arch_uint16_type (SCM self)
   struct type *type
     = gdbscm_arch_builtin_type (self, FUNC_NAME)->builtin_uint16;
 
-  return tyscm_scm_from_type_unsafe (type);
+  return tyscm_scm_from_type (type);
 }
 
 /* (arch-int32-type <gdb:arch>) -> <gdb:type> */
@@ -508,7 +466,7 @@ gdbscm_arch_int32_type (SCM self)
   struct type *type
     = gdbscm_arch_builtin_type (self, FUNC_NAME)->builtin_int32;
 
-  return tyscm_scm_from_type_unsafe (type);
+  return tyscm_scm_from_type (type);
 }
 
 /* (arch-uint32-type <gdb:arch>) -> <gdb:type> */
@@ -519,7 +477,7 @@ gdbscm_arch_uint32_type (SCM self)
   struct type *type
     = gdbscm_arch_builtin_type (self, FUNC_NAME)->builtin_uint32;
 
-  return tyscm_scm_from_type_unsafe (type);
+  return tyscm_scm_from_type (type);
 }
 
 /* (arch-int64-type <gdb:arch>) -> <gdb:type> */
@@ -530,7 +488,7 @@ gdbscm_arch_int64_type (SCM self)
   struct type *type
     = gdbscm_arch_builtin_type (self, FUNC_NAME)->builtin_int64;
 
-  return tyscm_scm_from_type_unsafe (type);
+  return tyscm_scm_from_type (type);
 }
 
 /* (arch-uint64-type <gdb:arch>) -> <gdb:type> */
@@ -541,7 +499,7 @@ gdbscm_arch_uint64_type (SCM self)
   struct type *type
     = gdbscm_arch_builtin_type (self, FUNC_NAME)->builtin_uint64;
 
-  return tyscm_scm_from_type_unsafe (type);
+  return tyscm_scm_from_type (type);
 }
 
 /* Initialize the Scheme architecture support.  */
@@ -702,7 +660,6 @@ gdbscm_initialize_arches (void)
   arch_smob_tag = gdbscm_make_smob_type (arch_smob_name, sizeof (arch_smob));
   scm_set_smob_mark (arch_smob_tag, arscm_mark_arch_smob);
   scm_set_smob_print (arch_smob_tag, arscm_print_arch_smob);
-  scm_set_smob_equalp (arch_smob_tag, arscm_equal_p_arch_smob);
 
   gdbscm_define_functions (arch_functions, 1);
 

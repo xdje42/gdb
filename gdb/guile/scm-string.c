@@ -1,6 +1,6 @@
 /* GDB/Scheme charset interface.
 
-   Copyright (C) 2013 Free Software Foundation, Inc.
+   Copyright (C) 2014 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -122,6 +122,65 @@ gdbscm_scm_to_string (SCM string, size_t *lenp,
   gdb_assert (gdbscm_is_exception (scm_result));
   *except_scmp = scm_result;
   return NULL;
+}
+
+/* Struct to pass data from gdbscm_scm_from_string to
+   gdbscm_call_scm_from_stringn.  */
+
+struct scm_from_stringn_data
+{
+  const char *string;
+  size_t len;
+  const char *charset;
+  int conversion_kind;
+  SCM result;
+};
+
+/* Helper for gdbscm_scm_from_string to call scm_from_stringn
+   from within scm_c_catch.  */
+
+static SCM
+gdbscm_call_scm_from_stringn (void *datap)
+{
+  struct scm_from_stringn_data *data = datap;
+
+  data->result = scm_from_stringn (data->string, data->len, data->charset,
+				   data->conversion_kind);
+  return SCM_BOOL_F;
+}
+
+/* Convert STRING to a Scheme string in charset CHARSET.
+   This function is guaranteed to not throw an exception.
+   If STRICT is non-zero, and there's a conversion error, then a
+   <gdb:exception> object is returned.
+   If STRICT is zero, then question marks are used for characters that
+   can't be converted (limitation of underlying Guile conversion support).  */
+
+SCM
+gdbscm_scm_from_string (const char *string, size_t len,
+			const char *charset, int strict)
+{
+  struct scm_from_stringn_data data;
+  SCM scm_result;
+
+  data.string = string;
+  data.len = len;
+  data.charset = charset;
+  /* The use of SCM_FAILED_CONVERSION_QUESTION_MARK is specified by Guile.  */
+  data.conversion_kind = (strict
+			  ? SCM_FAILED_CONVERSION_ERROR
+			  : SCM_FAILED_CONVERSION_QUESTION_MARK);
+  data.result = SCM_UNDEFINED;
+
+  scm_result = gdbscm_call_guile (gdbscm_call_scm_from_stringn, &data, NULL);
+
+  if (gdbscm_is_false (scm_result))
+    {
+      gdb_assert (!SCM_UNBNDP (data.result));
+      return data.result;
+    }
+  gdb_assert (gdbscm_is_exception (scm_result));
+  return scm_result;
 }
 
 /* Convert an SCM string to a target string.

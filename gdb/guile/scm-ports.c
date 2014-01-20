@@ -1,7 +1,7 @@
 /* Support for connecting Guile's stdio to GDB's.
    as well as r/w memory via ports.
 
-   Copyright (C) 2013 Free Software Foundation, Inc.
+   Copyright (C) 2014 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -22,9 +22,18 @@
    conventions, et.al.  */
 
 #include "defs.h"
+#include "gdb_select.h"
 #include "interps.h"
 #include "target.h"
 #include "guile-internal.h"
+
+#ifdef HAVE_POLL
+#if defined (HAVE_POLL_H)
+#include <poll.h>
+#elif defined (HAVE_SYS_POLL_H)
+#include <sys/poll.h>
+#endif
+#endif
 
 /* A ui-file for sending output to Guile.  */
 
@@ -117,7 +126,95 @@ static SCM mode_keyword;
 static SCM start_keyword;
 static SCM size_keyword;
 
-/* Input support (gdb_stdin).  */
+/* Helper to do the low level work of opening a port.
+   Newer versions of Guile (2.1.x) have scm_c_make_port.  */
+
+static SCM
+ioscm_open_port (scm_t_bits port_type, long mode_bits)
+{
+  SCM port;
+
+#if 0 /* TODO: Guile doesn't export this.  What to do?  */
+  scm_i_scm_pthread_mutex_lock (&scm_i_port_table_mutex);
+#endif
+
+  port = scm_new_port_table_entry (port_type);
+
+  SCM_SET_CELL_TYPE (port, port_type | mode_bits);
+
+#if 0 /* TODO: Guile doesn't export this.  What to do?  */
+  scm_i_pthread_mutex_unlock (&scm_i_port_table_mutex);
+#endif
+
+  return port;
+}
+
+/* Support for connecting Guile's stdio ports to GDB's stdio ports.  */
+
+/* The scm_t_ptob_descriptor.input_waiting "method".
+   Return a lower bound on the number of bytes available for input.  */
+
+static int
+ioscm_input_waiting (SCM port)
+{
+  int fdes = 0;
+
+  if (! scm_is_eq (port, input_port_scm))
+    return 0;
+
+#ifdef HAVE_POLL
+  {
+    /* This is copied from libguile/fports.c.  */
+    struct pollfd pollfd = { fdes, POLLIN, 0 };
+    static int use_poll = -1;
+
+    if (use_poll < 0)
+      {
+	/* This is copied from event-loop.c: poll cannot be used for stdin on
+	   m68k-motorola-sysv.  */
+	struct pollfd test_pollfd = { fdes, POLLIN, 0 };
+
+	if (poll (&test_pollfd, 1, 0) == 1 && (test_pollfd.revents & POLLNVAL))
+	  use_poll = 0;
+	else
+	  use_poll = 1;
+      }
+
+    if (use_poll)
+      {
+	/* Guile doesn't export SIGINT hooks like Python does.
+	   For now pass EINTR to scm_syserror, that's what fports.c does.  */
+	if (poll (&pollfd, 1, 0) < 0)
+	  scm_syserror (FUNC_NAME);
+
+	return pollfd.revents & POLLIN ? 1 : 0;
+      }
+  }
+  /* Fall through.  */
+#endif
+
+  {
+    struct timeval timeout;
+    fd_set input_fds;
+    int num_fds = fdes + 1;
+    int num_found;
+
+    memset (&timeout, 0, sizeof (timeout));
+    FD_ZERO (&input_fds);
+    FD_SET (fdes, &input_fds);
+
+    num_found = gdb_select (num_fds, &input_fds, NULL, NULL, &timeout);
+    if (num_found < 0)
+      {
+	/* Guile doesn't export SIGINT hooks like Python does.
+	   For now pass EINTR to scm_syserror, that's what fports.c does.  */
+        scm_syserror (FUNC_NAME);
+      }
+    return num_found > 0 && FD_ISSET (fdes, &input_fds);
+  }
+}
+
+/* The scm_t_ptob_descriptor.fill_input "method".  */
 
 static int
 ioscm_fill_input (SCM port)
@@ -127,16 +224,15 @@ ioscm_fill_input (SCM port)
   scm_t_port *pt = SCM_PTAB_ENTRY (port);
 
   /* If we're called on stdout,stderr, punt.  */
-  if (scm_is_eq (port, output_port_scm)
-      || scm_is_eq (port, error_port_scm))
-    return 0; /* Set errno and return -1?  */
+  if (! scm_is_eq (port, input_port_scm))
+    return (scm_t_wchar) EOF; /* Set errno and return -1?  */
 
   gdb_flush (gdb_stdout);
   gdb_flush (gdb_stderr);
 
   count = ui_file_read (gdb_stdin, (char *) pt->read_buf, pt->read_buf_size);
   if (count == -1)
-    scm_syserror ("ioscm_fill_input_stdin");
+    scm_syserror (FUNC_NAME);
   if (count == 0)
     return (scm_t_wchar) EOF;
 
@@ -196,6 +292,108 @@ ioscm_flush (SCM port)
     gdb_flush (gdb_stderr);
   else
     gdb_flush (gdb_stdout);
+}
+
+/* Initialize the gdb stdio port type.
+
+   N.B. isatty? will fail on these ports, it is only supported for file
+   ports.  IWBN if we could "subclass" file ports.  */
+
+static void
+ioscm_init_gdb_stdio_port (void)
+{
+  stdio_port_desc = scm_make_port_type (stdio_port_desc_name,
+					ioscm_fill_input, ioscm_write);
+
+  scm_set_port_input_waiting (stdio_port_desc, ioscm_input_waiting);
+  scm_set_port_flush (stdio_port_desc, ioscm_flush);
+}
+
+/* Subroutine of ioscm_make_gdb_stdio_port to simplify it.
+   Set up the buffers of port PORT.
+   MODE_BITS are the mode bits of PORT.  */
+
+static void
+ioscm_init_stdio_buffers (SCM port, long mode_bits)
+{
+  scm_t_port *pt = SCM_PTAB_ENTRY (port);
+#define GDB_STDIO_BUFFER_DEFAULT_SIZE 1024
+  int size = mode_bits & SCM_BUF0 ? 0 : GDB_STDIO_BUFFER_DEFAULT_SIZE;
+  int writing = (mode_bits & SCM_WRTNG) != 0;
+
+  /* This is heavily copied from scm_fport_buffer_add.  */
+
+  if (!writing && size > 0)
+    {
+      pt->read_buf = scm_gc_malloc_pointerless (size, "port buffer");
+      pt->read_pos = pt->read_end = pt->read_buf;
+      pt->read_buf_size = size;
+    }
+  else
+    {
+      pt->read_pos = pt->read_buf = pt->read_end = &pt->shortbuf;
+      pt->read_buf_size = 1;
+    }
+
+  if (writing && size > 0)
+    {
+      pt->write_buf = scm_gc_malloc_pointerless (size, "port buffer");
+      pt->write_pos = pt->write_buf;
+      pt->write_buf_size = size;
+    }
+  else
+    {
+      pt->write_buf = pt->write_pos = &pt->shortbuf;
+      pt->write_buf_size = 1;
+    }
+  pt->write_end = pt->write_buf + pt->write_buf_size;
+}
+
+/* Create a gdb stdio port.  */
+
+static SCM
+ioscm_make_gdb_stdio_port (int fd)
+{
+  int is_a_tty = isatty (fd);
+  const char *name;
+  long mode_bits;
+  SCM port;
+
+  switch (fd)
+    {
+    case 0:
+      name = input_port_name;
+      mode_bits = scm_mode_bits (is_a_tty ? "r0" : "r");
+      break;
+    case 1:
+      name = output_port_name;
+      mode_bits = scm_mode_bits (is_a_tty ? "w0" : "w");
+      break;
+    case 2:
+      name = error_port_name;
+      mode_bits = scm_mode_bits (is_a_tty ? "w0" : "w");
+      break;
+    default:
+      gdb_assert_not_reached ("bad stdio file descriptor");
+    }
+
+  port = ioscm_open_port (stdio_port_desc, mode_bits);
+
+  scm_set_port_filename_x (port, gdbscm_scm_from_c_string (name));
+
+  ioscm_init_stdio_buffers (port, mode_bits);
+
+  return port;
+}
+
+/* (stdio-port? object) -> boolean */
+
+static SCM
+gdbscm_stdio_port_p (SCM scm)
+{
+  /* This is copied from SCM_FPORTP.  */
+  return scm_from_bool (!SCM_IMP (scm)
+			&& (SCM_TYP16 (scm) == stdio_port_desc));
 }
 
 /* GDB's ports are accessed via functions to keep them read-only.  */
@@ -282,7 +480,7 @@ ioscm_file_port_write (struct ui_file *file,
 static struct ui_file *
 ioscm_file_port_new (SCM port)
 {
-  ioscm_file_port *stream = XMALLOC (ioscm_file_port);
+  ioscm_file_port *stream = XCNEW (ioscm_file_port);
   struct ui_file *file = ui_file_new ();
 
   set_ui_file_data (file, stream, ioscm_file_port_delete);
@@ -293,42 +491,6 @@ ioscm_file_port_new (SCM port)
   stream->port = port;
 
   return file;
-}
-
-/* Return the file mode bits stored in desc.  */
-
-static int
-get_mode_bits (int desc)
-{
-  return desc & (SCM_OPN | SCM_RDNG | SCM_WRTNG | SCM_BUF0 | SCM_BUFLINE);
-}
-
-/* Subclass an fport, installing our methods.  */
-
-static scm_t_bits
-ioscm_subclass_fport (SCM orig_port)
-{
-  int orig_port_type, port_type;
-  scm_t_bits port_desc;
-
-  orig_port_type = SCM_PTOBNUM (orig_port);
-
-  port_desc = scm_make_port_type (stdio_port_desc_name, NULL, NULL);
-  port_type = SCM_TC2PTOBNUM (port_desc);
-
-  /* Copy fport methods into our "vtable".
-     Note: scm_ptobs is deprecated in 2.2.  Need to see how this will
-     need to change.  */
-  scm_ptobs[port_type] = scm_ptobs[orig_port_type];
-  /* Preserve the name.  */
-  scm_ptobs[port_type].name = stdio_port_desc_name;
-  /* There is no scm_set_port_fill_input.  */
-  scm_ptobs[port_type].fill_input = ioscm_fill_input;
-  /* There is no scm_set_port_write.  */
-  scm_ptobs[port_type].write = ioscm_write;
-  scm_set_port_flush (port_desc, ioscm_flush);
-
-  return port_desc;
 }
 
 /* Helper routine for with-{output,error}-to-port.  */
@@ -716,22 +878,19 @@ gdbscm_memory_port_print (SCM exp, SCM port, scm_print_state *pstate)
 
 /* Create the port type used for memory.  */
 
-static scm_t_bits
-ioscm_create_memory_port_type (char *name)
+static void
+ioscm_init_memory_port_type (void)
 {
-  scm_t_bits port_desc;
+  memory_port_desc = scm_make_port_type (memory_port_desc_name,
+					 gdbscm_memory_port_fill_input,
+					 gdbscm_memory_port_write);
 
-  port_desc = scm_make_port_type (name, gdbscm_memory_port_fill_input,
-				  gdbscm_memory_port_write);
-
-  scm_set_port_end_input (port_desc, gdbscm_memory_port_end_input);
-  scm_set_port_flush (port_desc, gdbscm_memory_port_flush);
-  scm_set_port_seek (port_desc, gdbscm_memory_port_seek);
-  scm_set_port_close (port_desc, gdbscm_memory_port_close);
-  scm_set_port_free (port_desc, gdbscm_memory_port_free);
-  scm_set_port_print (port_desc, gdbscm_memory_port_print);
-
-  return port_desc;
+  scm_set_port_end_input (memory_port_desc, gdbscm_memory_port_end_input);
+  scm_set_port_flush (memory_port_desc, gdbscm_memory_port_flush);
+  scm_set_port_seek (memory_port_desc, gdbscm_memory_port_seek);
+  scm_set_port_close (memory_port_desc, gdbscm_memory_port_close);
+  scm_set_port_free (memory_port_desc, gdbscm_memory_port_free);
+  scm_set_port_print (memory_port_desc, gdbscm_memory_port_print);
 }
 
 /* Helper for gdbscm_open_memory to parse the mode bits.
@@ -768,29 +927,6 @@ ioscm_parse_mode_bits (const char *func_name, const char *mode)
   mode_bits = scm_mode_bits ((char *) mode);
 
   return mode_bits;
-}
-
-/* Helper for gdbscm_open_memory to do the low level work
-   of opening a port.  */
-
-static SCM
-ioscm_open_port (scm_t_bits port_type, long mode_bits)
-{
-  SCM port;
-
-#if 0 /* TODO: Guile doesn't export this.  What to do?  */
-  scm_i_scm_pthread_mutex_lock (&scm_i_port_table_mutex);
-#endif
-
-  port = scm_new_port_table_entry (port_type);
-
-  SCM_SET_CELL_TYPE (port, port_type | mode_bits);
-
-#if 0 /* TODO: Guile doesn't export this.  What to do?  */
-  scm_i_pthread_mutex_unlock (&scm_i_port_table_mutex);
-#endif
-
-  return port;
 }
 
 /* Helper for gdbscm_open_memory to finish initializing the port.
@@ -892,6 +1028,8 @@ ioscm_reinit_memory_port (SCM port, size_t read_buf_size,
    MODE is a string, and must be one of "r", "w", or "r+".
    For compatibility "b" (binary) may also be present, but we ignore it:
    memory ports are binary only.
+
+   TODO: Support "0" (unbuffered)?  Only support "0" (always unbuffered)?
 
    The chunk of memory that can be accessed can be bounded.
    If both START,SIZE are unspecified, all of memory can be accessed.
@@ -1110,6 +1248,10 @@ Return gdb's output port." },
     "\
 Return gdb's error port." },
 
+  { "stdio-port?", 1, 0, 0, gdbscm_stdio_port_p,
+    "\
+Return #t if the object is a gdb:stdio-port." },
+
   { "open-memory", 0, 0, 1, gdbscm_open_memory,
     "\
 Return a port that can be used for reading/writing inferior memory.\n\
@@ -1194,47 +1336,22 @@ This procedure is experimental." },
 void
 gdbscm_initialize_ports (void)
 {
-  /* What we're trying to do here is make a copy of stdin, etc. and replacing
-     the few methods we need to, without affecting anything else.
-     E.g. isatty? will still return the same value.  */
+  /* Save the original stdio ports for debugging purposes.  */
 
   orig_input_port_scm = scm_current_input_port ();
   orig_output_port_scm = scm_current_output_port ();
   orig_error_port_scm = scm_current_error_port ();
 
-  stdio_port_desc = ioscm_subclass_fport (orig_input_port_scm);
+  /* Set up the stdio ports.  */
 
-  /* Set up stdin.  */
-
-  input_port_scm
-    = scm_fdes_to_port (0, isatty (0) ? "r0" : "r",
-			gdbscm_scm_from_c_string (input_port_name));
-  SCM_SET_CELL_TYPE (input_port_scm,
-		     stdio_port_desc
-		     | get_mode_bits (SCM_CELL_TYPE (input_port_scm)));
-
-  /* Set up stdout.  */
-
-  output_port_scm
-    = scm_fdes_to_port (1, isatty (1) ? "w0" : "w",
-			gdbscm_scm_from_c_string (output_port_name));
-  SCM_SET_CELL_TYPE (output_port_scm,
-		     stdio_port_desc
-		     | get_mode_bits (SCM_CELL_TYPE (output_port_scm)));
-
-  /* Set up stderr.  */
-
-  error_port_scm
-    = scm_fdes_to_port (2, isatty (2) ? "w0" : "w",
-			gdbscm_scm_from_c_string (error_port_name));
-  SCM_SET_CELL_TYPE (error_port_scm,
-		     stdio_port_desc
-		     | get_mode_bits (SCM_CELL_TYPE (error_port_scm)));
+  ioscm_init_gdb_stdio_port ();
+  input_port_scm = ioscm_make_gdb_stdio_port (0);
+  output_port_scm = ioscm_make_gdb_stdio_port (1);
+  error_port_scm = ioscm_make_gdb_stdio_port (2);
 
   /* Set up memory ports.  */
 
-  memory_port_desc
-    = ioscm_create_memory_port_type (memory_port_desc_name);
+  ioscm_init_memory_port_type ();
 
   /* Install the accessor functions.  */
 

@@ -1,6 +1,6 @@
 /* Scheme interface to stack frames.
 
-   Copyright (C) 2008-2013 Free Software Foundation, Inc.
+   Copyright (C) 2008-2014 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -73,7 +73,7 @@ static const char frame_smob_name[] = "gdb:frame";
 static scm_t_bits frame_smob_tag;
 
 /* Keywords used in argument passing.  */
-static SCM frscm_block_keyword;
+static SCM block_keyword;
 
 static const struct inferior_data *frscm_inferior_data_key;
 
@@ -226,14 +226,25 @@ gdbscm_frame_p (SCM scm)
    Returns a <gdb:exception> object if there is an error.  */
 
 static SCM
-frscm_gsmob_from_frame (struct frame_info *frame, struct inferior *inferior)
+frscm_scm_from_frame (struct frame_info *frame, struct inferior *inferior)
 {
-  frame_smob *f_smob;
+  frame_smob *f_smob, f_smob_for_lookup;
   SCM f_scm;
+  htab_t htab;
+  eqable_gdb_smob **slot;
   volatile struct gdb_exception except;
   struct frame_id frame_id = null_frame_id;
   struct gdbarch *gdbarch = NULL;
   int frame_id_is_next = 0;
+
+  /* If we've already created a gsmob for this frame, return it.
+     This makes frames eq?-able.  */
+  htab = frscm_inferior_frame_map (inferior);
+  f_smob_for_lookup.frame_id = get_frame_id (frame);
+  f_smob_for_lookup.inferior = inferior;
+  slot = gdbscm_find_eqable_gsmob_ptr_slot (htab, &f_smob_for_lookup.base);
+  if (*slot != NULL)
+    return (*slot)->containing_scm;
 
   TRY_CATCH (except, RETURN_MASK_ALL)
     {
@@ -264,70 +275,36 @@ frscm_gsmob_from_frame (struct frame_info *frame, struct inferior *inferior)
   f_smob->inferior = inferior;
   f_smob->frame_id_is_next = frame_id_is_next;
 
+  gdbscm_fill_eqable_gsmob_ptr_slot (slot, &f_smob->base, f_scm);
+
   return f_scm;
 }
 
 /* Create a new <gdb:frame> object that encapsulates FRAME.
-   The object is passed through *smob->scm*.
    A Scheme exception is thrown if there is an error.  */
 
 static SCM
 frscm_scm_from_frame_unsafe (struct frame_info *frame,
 			     struct inferior *inferior)
 {
-  htab_t htab;
-  eqable_gdb_smob **slot;
-  frame_smob *f_smob, f_smob_for_lookup;
-  SCM f_scm, result;
-
-  /* If we've already created a gsmob for this frame, return it.
-     This makes frames eq?-able.  */
-  htab = frscm_inferior_frame_map (inferior);
-  f_smob_for_lookup.frame_id = get_frame_id (frame);
-  f_smob_for_lookup.inferior = inferior;
-  slot = gdbscm_find_eqable_gsmob_ptr_slot (htab, &f_smob_for_lookup.base);
-  if (*slot != NULL)
-    return (*slot)->containing_scm;
-
-  f_scm = frscm_gsmob_from_frame (frame, inferior);
+  SCM f_scm = frscm_scm_from_frame (frame, inferior);
 
   if (gdbscm_is_exception (f_scm))
     gdbscm_throw (f_scm);
 
-  f_smob = (frame_smob *) SCM_SMOB_DATA (f_scm);
-  result = gdbscm_scm_from_gsmob_unsafe (f_scm);
-  gdbscm_fill_eqable_gsmob_ptr_slot (slot, &f_smob->base, result);
-
-  return result;
-}
-
-/* Returns the <gdb:frame> object in SCM or #f if SCM is not a
-   <gdb:frame> object.
-   Returns a <gdb:exception> object if there was a problem during the
-   conversion.  */
-
-static SCM
-frscm_scm_to_frame_gsmob (SCM scm)
-{
-  return gdbscm_scm_to_gsmob_safe (scm, frame_smob_tag);
+  return f_scm;
 }
 
 /* Returns the <gdb:frame> object in SELF.
-   Throws an exception if SELF is not a <gdb:frame> object
-   (after passing it through *scm->smob*).  */
+   Throws an exception if SELF is not a <gdb:frame> object.  */
 
 static SCM
 frscm_get_frame_arg_unsafe (SCM self, int arg_pos, const char *func_name)
 {
-  SCM f_scm = frscm_scm_to_frame_gsmob (self);
-
-  if (gdbscm_is_exception (f_scm))
-    gdbscm_throw (f_scm);
-
-  SCM_ASSERT_TYPE (frscm_is_frame (f_scm), self, arg_pos, func_name,
+  SCM_ASSERT_TYPE (frscm_is_frame (self), self, arg_pos, func_name,
 		   frame_smob_name);
 
-  return f_scm;
+  return self;
 }
 
 /* There is no gdbscm_scm_to_frame function because translating
@@ -647,7 +624,7 @@ gdbscm_frame_block (SCM self)
       SCM block_scm;
 
       st = SYMBOL_SYMTAB (BLOCK_FUNCTION (fn_block));
-      return bkscm_scm_from_block_unsafe (block, st->objfile);
+      return bkscm_scm_from_block (block, st->objfile);
     }
 
   return SCM_BOOL_F;
@@ -682,7 +659,7 @@ gdbscm_frame_function (SCM self)
     }
 
   if (sym != NULL)
-    return syscm_scm_from_symbol_unsafe (sym);
+    return syscm_scm_from_symbol (sym);
 
   return SCM_BOOL_F;
 }
@@ -782,7 +759,7 @@ gdbscm_frame_sal (SCM self)
 				   _("<gdb:frame>"));
     }
 
-  return stscm_scm_from_sal_unsafe (sal);
+  return stscm_scm_from_sal (sal);
 }
 
 /* (frame-read-var <gdb:frame> <gdb:symbol>) -> <gdb:value>
@@ -796,9 +773,8 @@ gdbscm_frame_sal (SCM self)
 static SCM
 gdbscm_frame_read_var (SCM self, SCM symbol_scm, SCM rest)
 {
-  SCM keywords[] = { frscm_block_keyword, SCM_BOOL_F };
+  SCM keywords[] = { block_keyword, SCM_BOOL_F };
   int rc;
-  SCM s_scm;
   frame_smob *f_smob;
   int block_arg_pos = -1;
   SCM block_scm = SCM_UNDEFINED;
@@ -824,14 +800,12 @@ gdbscm_frame_read_var (SCM self, SCM symbol_scm, SCM rest)
   gdbscm_parse_function_args (FUNC_NAME, SCM_ARG3, keywords, "#O",
 			      rest, &block_arg_pos, &block_scm);
 
-  s_scm = syscm_scm_to_symbol_gsmob (symbol_scm);
-  if (syscm_is_symbol (s_scm))
+  if (syscm_is_symbol (symbol_scm))
     {
-      var = syscm_get_valid_symbol_arg_unsafe (s_scm, SCM_ARG2, FUNC_NAME);
+      var = syscm_get_valid_symbol_arg_unsafe (symbol_scm, SCM_ARG2,
+					       FUNC_NAME);
       SCM_ASSERT (SCM_UNBNDP (block_scm), block_scm, SCM_ARG3, FUNC_NAME);
     }
-  else if (gdbscm_is_exception (s_scm))
-    gdbscm_throw (s_scm);
   else if (scm_is_string (symbol_scm))
     {
       char *var_name;
@@ -887,7 +861,7 @@ gdbscm_frame_read_var (SCM self, SCM symbol_scm, SCM rest)
     }
   GDBSCM_HANDLE_GDB_EXCEPTION (except);
 
-  return vlscm_scm_from_value_unsafe (value);
+  return vlscm_scm_from_value (value);
 }
 
 /* (frame-select <gdb:frame>) -> unspecified
@@ -1094,7 +1068,7 @@ gdbscm_initialize_frames (void)
   gdbscm_define_integer_constants (frame_integer_constants, 1);
   gdbscm_define_functions (frame_functions, 1);
 
-  frscm_block_keyword = scm_from_latin1_keyword ("block");
+  block_keyword = scm_from_latin1_keyword ("block");
 
   /* Register an inferior "free" callback so we can properly
      invalidate frames when an inferior file is about to be deleted.  */

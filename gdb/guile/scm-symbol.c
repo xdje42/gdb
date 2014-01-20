@@ -1,6 +1,6 @@
 /* Scheme interface to symbols.
 
-   Copyright (C) 2008-2013 Free Software Foundation, Inc.
+   Copyright (C) 2008-2014 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -46,9 +46,9 @@ static const char symbol_smob_name[] = "gdb:symbol";
 static scm_t_bits symbol_smob_tag;
 
 /* Keywords used in argument passing.  */
-static SCM syscm_block_keyword;
-static SCM syscm_domain_keyword;
-static SCM syscm_frame_keyword;
+static SCM block_keyword;
+static SCM domain_keyword;
+static SCM frame_keyword;
 
 static const struct objfile_data *syscm_objfile_data_key;
 
@@ -181,17 +181,15 @@ gdbscm_symbol_p (SCM scm)
 }
 
 /* Return the existing object that encapsulates SYMBOL, or create a new
-   <gdb:symbol> object.
-   If the object is created it is passed through *smob->scm*.
-   A Scheme exception is thrown if there is an error.  */
+   <gdb:symbol> object.  */
 
 SCM
-syscm_scm_from_symbol_unsafe (struct symbol *symbol)
+syscm_scm_from_symbol (struct symbol *symbol)
 {
   htab_t htab;
   eqable_gdb_smob **slot;
   symbol_smob *s_smob, s_smob_for_lookup;
-  SCM s_scm, result;
+  SCM s_scm;
 
   /* If we've already created a gsmob for this symbol, return it.
      This makes symbols eq?-able.  */
@@ -204,44 +202,25 @@ syscm_scm_from_symbol_unsafe (struct symbol *symbol)
   s_scm = syscm_make_symbol_smob ();
   s_smob = (symbol_smob *) SCM_SMOB_DATA (s_scm);
   s_smob->symbol = symbol;
-  result = gdbscm_scm_from_gsmob_unsafe (s_scm);
-  gdbscm_fill_eqable_gsmob_ptr_slot (slot, &s_smob->base, result);
-
-  return result;
-}
-
-/* Returns the <gdb:symbol> object contained in SCM or #f if SCM is not a
-   <gdb:symbol> object.
-   Returns a <gdb:exception> object if there was a problem during the
-   conversion.  */
-
-SCM
-syscm_scm_to_symbol_gsmob (SCM scm)
-{
-  return gdbscm_scm_to_gsmob_safe (scm, symbol_smob_tag);
-}
-
-/* Returns the <gdb:symbol> object in SELF.
-   Throws an exception if SELF is not a <gdb:symbol> object
-   (after passing it through *scm->smob*).  */
-
-static SCM
-syscm_get_symbol_arg_unsafe (SCM self, int arg_pos, const char *func_name)
-{
-  SCM s_scm = syscm_scm_to_symbol_gsmob (self);
-
-  if (gdbscm_is_exception (s_scm))
-    gdbscm_throw (s_scm);
-
-  SCM_ASSERT_TYPE (syscm_is_symbol (s_scm), self, arg_pos, func_name,
-		   symbol_smob_name);
+  gdbscm_fill_eqable_gsmob_ptr_slot (slot, &s_smob->base, s_scm);
 
   return s_scm;
 }
 
+/* Returns the <gdb:symbol> object in SELF.
+   Throws an exception if SELF is not a <gdb:symbol> object.  */
+
+static SCM
+syscm_get_symbol_arg_unsafe (SCM self, int arg_pos, const char *func_name)
+{
+  SCM_ASSERT_TYPE (syscm_is_symbol (self), self, arg_pos, func_name,
+		   symbol_smob_name);
+
+  return self;
+}
+
 /* Returns a pointer to the symbol smob of SELF.
-   Throws an exception if SELF is not a <gdb:symbol> object
-   (after passing it through *scm->smob*).  */
+   Throws an exception if SELF is not a <gdb:symbol> object.  */
 
 static symbol_smob *
 syscm_get_symbol_smob_arg_unsafe (SCM self, int arg_pos, const char *func_name)
@@ -349,7 +328,7 @@ gdbscm_symbol_type (SCM self)
   if (SYMBOL_TYPE (symbol) == NULL)
     return SCM_BOOL_F;
 
-  return tyscm_scm_from_type_unsafe (SYMBOL_TYPE (symbol));
+  return tyscm_scm_from_type (SYMBOL_TYPE (symbol));
 }
 
 /* (symbol-symtab <gdb:symbol>) -> <gdb:symtab>
@@ -362,7 +341,7 @@ gdbscm_symbol_symtab (SCM self)
     = syscm_get_valid_symbol_smob_arg_unsafe (self, SCM_ARG1, FUNC_NAME);
   const struct symbol *symbol = s_smob->symbol;
 
-  return stscm_scm_from_symtab_unsafe (SYMBOL_SYMTAB (symbol));
+  return stscm_scm_from_symtab (SYMBOL_SYMTAB (symbol));
 }
 
 /* (symbol-name <gdb:symbol>) -> string */
@@ -516,7 +495,7 @@ gdbscm_symbol_value (SCM self, SCM rest)
   symbol_smob *s_smob
     = syscm_get_valid_symbol_smob_arg_unsafe (self, SCM_ARG1, FUNC_NAME);
   struct symbol *symbol = s_smob->symbol;
-  SCM keywords[] = { syscm_frame_keyword, SCM_BOOL_F };
+  SCM keywords[] = { frame_keyword, SCM_BOOL_F };
   int frame_pos = -1;
   SCM frame_scm = SCM_BOOL_F;
   frame_smob *f_smob = NULL;
@@ -551,7 +530,7 @@ gdbscm_symbol_value (SCM self, SCM rest)
     }
   GDBSCM_HANDLE_GDB_EXCEPTION (except);
 
-  return vlscm_scm_from_value_unsafe (value);
+  return vlscm_scm_from_value (value);
 }
 
 /* (lookup-symbol name [#:block <gdb:block>] [#:domain domain])
@@ -563,7 +542,7 @@ static SCM
 gdbscm_lookup_symbol (SCM name_scm, SCM rest)
 {
   char *name;
-  SCM keywords[] = { syscm_block_keyword, syscm_domain_keyword, SCM_BOOL_F };
+  SCM keywords[] = { block_keyword, domain_keyword, SCM_BOOL_F };
   const struct block *block = NULL;
   SCM block_scm = SCM_BOOL_F;
   int domain = VAR_DOMAIN;
@@ -614,7 +593,7 @@ gdbscm_lookup_symbol (SCM name_scm, SCM rest)
   if (symbol == NULL)
     return SCM_BOOL_F;
 
-  return scm_list_2 (syscm_scm_from_symbol_unsafe (symbol),
+  return scm_list_2 (syscm_scm_from_symbol (symbol),
 		     scm_from_bool (is_a_field_of_this.type != NULL));
 }
 
@@ -625,7 +604,7 @@ static SCM
 gdbscm_lookup_global_symbol (SCM name_scm, SCM rest)
 {
   char *name;
-  SCM keywords[] = { syscm_domain_keyword, SCM_BOOL_F };
+  SCM keywords[] = { domain_keyword, SCM_BOOL_F };
   int domain_arg_pos = -1;
   int domain = VAR_DOMAIN;
   struct symbol *symbol = NULL;
@@ -648,7 +627,7 @@ gdbscm_lookup_global_symbol (SCM name_scm, SCM rest)
   if (symbol == NULL)
     return SCM_BOOL_F;
 
-  return syscm_scm_from_symbol_unsafe (symbol);
+  return syscm_scm_from_symbol (symbol);
 }
 
 /* Initialize the Scheme symbol support.  */
@@ -787,9 +766,9 @@ gdbscm_initialize_symbols (void)
   gdbscm_define_integer_constants (symbol_integer_constants, 1);
   gdbscm_define_functions (symbol_functions, 1);
 
-  syscm_block_keyword = scm_from_latin1_keyword ("block");
-  syscm_domain_keyword = scm_from_latin1_keyword ("domain");
-  syscm_frame_keyword = scm_from_latin1_keyword ("frame");
+  block_keyword = scm_from_latin1_keyword ("block");
+  domain_keyword = scm_from_latin1_keyword ("domain");
+  frame_keyword = scm_from_latin1_keyword ("frame");
 
   /* Register an objfile "free" callback so we can properly
      invalidate symbols when an object file is about to be deleted.  */

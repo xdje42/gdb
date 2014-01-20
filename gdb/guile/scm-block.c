@@ -1,6 +1,6 @@
 /* Scheme interface to blocks.
 
-   Copyright (C) 2008-2013 Free Software Foundation, Inc.
+   Copyright (C) 2008-2014 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -214,35 +214,16 @@ gdbscm_block_p (SCM scm)
   return scm_from_bool (bkscm_is_block (scm));
 }
 
-/* Returns a new <gdb:block> object that encapsulates BLOCK.  */
-
-static SCM
-bkscm_gsmob_from_block (const struct block *block, struct objfile *objfile)
-{
-  SCM smob;
-  block_smob *b_smob;
-
-  smob = bkscm_make_block_smob ();
-  b_smob = (block_smob *) SCM_SMOB_DATA (smob);
-  b_smob->block = block;
-  b_smob->objfile = objfile;
-
-  return smob;
-}
-
 /* Return the existing object that encapsulates BLOCK, or create a new
-   <gdb:block> object.
-   If the object is created it is passed through *smob->scm*.
-   A Scheme exception is thrown if there is an error.  */
+   <gdb:block> object.  */
 
 SCM
-bkscm_scm_from_block_unsafe (const struct block *block,
-			     struct objfile *objfile)
+bkscm_scm_from_block (const struct block *block, struct objfile *objfile)
 {
   htab_t htab;
   eqable_gdb_smob **slot;
   block_smob *b_smob, b_smob_for_lookup;
-  SCM b_scm, result;
+  SCM b_scm;
 
   /* If we've already created a gsmob for this block, return it.
      This makes blocks eq?-able.  */
@@ -252,46 +233,29 @@ bkscm_scm_from_block_unsafe (const struct block *block,
   if (*slot != NULL)
     return (*slot)->containing_scm;
 
-  b_scm = bkscm_gsmob_from_block (block, objfile);
+  b_scm = bkscm_make_block_smob ();
   b_smob = (block_smob *) SCM_SMOB_DATA (b_scm);
-  result = gdbscm_scm_from_gsmob_unsafe (b_scm);
-  gdbscm_fill_eqable_gsmob_ptr_slot (slot, &b_smob->base, result);
-
-  return result;
-}
-
-/* Returns the <gdb:block> object in SCM or #f if SCM is not a
-   <gdb:block> object.
-   Returns a <gdb:exception> object if there was a problem during the
-   conversion.  */
-
-static SCM
-bkscm_scm_to_block_gsmob (SCM scm)
-{
-  return gdbscm_scm_to_gsmob_safe (scm, block_smob_tag);
-}
-
-/* Returns the <gdb:block> object in SELF.
-   Throws an exception if SELF is not a <gdb:block> object
-   (after passing it through *scm->smob*).  */
-
-static SCM
-bkscm_get_block_arg_unsafe (SCM self, int arg_pos, const char *func_name)
-{
-  SCM b_scm = bkscm_scm_to_block_gsmob (self);
-
-  if (gdbscm_is_exception (b_scm))
-    gdbscm_throw (b_scm);
-
-  SCM_ASSERT_TYPE (bkscm_is_block (b_scm), self, arg_pos, func_name,
-		   block_smob_name);
+  b_smob->block = block;
+  b_smob->objfile = objfile;
+  gdbscm_fill_eqable_gsmob_ptr_slot (slot, &b_smob->base, b_scm);
 
   return b_scm;
 }
 
+/* Returns the <gdb:block> object in SELF.
+   Throws an exception if SELF is not a <gdb:block> object.  */
+
+static SCM
+bkscm_get_block_arg_unsafe (SCM self, int arg_pos, const char *func_name)
+{
+  SCM_ASSERT_TYPE (bkscm_is_block (self), self, arg_pos, func_name,
+		   block_smob_name);
+
+  return self;
+}
+
 /* Returns a pointer to the block smob of SELF.
-   Throws an exception if SELF is not a <gdb:block> object
-   (after passing it through *scm->smob*).  */
+   Throws an exception if SELF is not a <gdb:block> object.  */
 
 static block_smob *
 bkscm_get_block_smob_arg_unsafe (SCM self, int arg_pos, const char *func_name)
@@ -311,8 +275,7 @@ bkscm_is_valid (block_smob *b_smob)
 }
 
 /* Returns the block smob in SELF, verifying it's valid.
-   Throws an exception if SELF is not a <gdb:block> object or is invalid
-   (after passing it through *scm->smob*).  */
+   Throws an exception if SELF is not a <gdb:block> object or is invalid.  */
 
 static block_smob *
 bkscm_get_valid_block_smob_arg_unsafe (SCM self, int arg_pos,
@@ -331,34 +294,22 @@ bkscm_get_valid_block_smob_arg_unsafe (SCM self, int arg_pos,
 }
 
 /* Returns the block smob contained in SCM or NULL if SCM is not a
-   <gdb:block> object, or there's an error during the conversion.
+   <gdb:block> object.
    If there is an error a <gdb:exception> object is stored in *EXCP.  */
 
 static block_smob *
 bkscm_get_valid_block (SCM scm, int arg_pos, const char *func_name, SCM *excp)
 {
   block_smob *b_smob;
-  SCM b_scm;
 
-  if (bkscm_is_block (scm))
-    b_scm = scm;
-  else
+  if (!bkscm_is_block (scm))
     {
-      b_scm = gdbscm_scm_to_gsmob_safe (scm, block_smob_tag);
-      if (gdbscm_is_exception (b_scm))
-	{
-	  *excp = b_scm;
-	  return NULL;
-	}
-      if (!bkscm_is_block (b_scm))
-	{
-	  *excp = gdbscm_make_type_error (func_name, arg_pos, scm,
-					  block_smob_name);
-	  return NULL;
-	}
+      *excp = gdbscm_make_type_error (func_name, arg_pos, scm,
+				      block_smob_name);
+      return NULL;
     }
 
-  b_smob = (block_smob *) SCM_SMOB_DATA (b_scm);
+  b_smob = (block_smob *) SCM_SMOB_DATA (scm);
   if (!bkscm_is_valid (b_smob))
     {
       *excp = gdbscm_make_invalid_object_error (func_name, arg_pos, scm,
@@ -370,9 +321,8 @@ bkscm_get_valid_block (SCM scm, int arg_pos, const char *func_name, SCM *excp)
 }
 
 /* Returns the struct block that is wrapped by BLOCK_SCM.
-   If BLOCK_SCM is not a block, or is an invalid block, or an error happens
-   during the conversion NULL is returned and a <gdb:exception> object is
-   stored in *EXCP.  */
+   If BLOCK_SCM is not a block, or is an invalid block, then NULL is returned
+   and a <gdb:exception> object is stored in *EXCP.  */
 
 const struct block *
 bkscm_scm_to_block (SCM block_scm, int arg_pos, const char *func_name,
@@ -467,8 +417,8 @@ gdbscm_block_function (SCM self)
 
   sym = BLOCK_FUNCTION (block);
 
-  if (sym)
-    return syscm_scm_from_symbol_unsafe (sym);
+  if (sym != NULL)
+    return syscm_scm_from_symbol (sym);
   return SCM_BOOL_F;
 }
 
@@ -485,7 +435,7 @@ gdbscm_block_superblock (SCM self)
   super_block = BLOCK_SUPERBLOCK (block);
 
   if (super_block)
-    return bkscm_scm_from_block_unsafe (super_block, b_smob->objfile);
+    return bkscm_scm_from_block (super_block, b_smob->objfile);
   return SCM_BOOL_F;
 }
 
@@ -502,7 +452,7 @@ gdbscm_block_global_block (SCM self)
 
   global_block = block_global_block (block);
 
-  return bkscm_scm_from_block_unsafe (global_block, b_smob->objfile);
+  return bkscm_scm_from_block (global_block, b_smob->objfile);
 }
 
 /* (block-static-block <gdb:block>) -> <gdb:block>
@@ -522,7 +472,7 @@ gdbscm_block_static_block (SCM self)
 
   static_block = block_static_block (block);
 
-  return bkscm_scm_from_block_unsafe (static_block, b_smob->objfile);
+  return bkscm_scm_from_block (static_block, b_smob->objfile);
 }
 
 /* (block-global? <gdb:block>) -> boolean
@@ -573,7 +523,7 @@ gdbscm_block_symbols (SCM self)
 
   while (sym != NULL)
     {
-      SCM s_scm = syscm_scm_from_symbol_unsafe (sym);
+      SCM s_scm = syscm_scm_from_symbol (sym);
 
       result = scm_cons (s_scm, result);
       sym = block_iterator_next (&iter);
@@ -690,14 +640,14 @@ gdbscm_make_block_syms_iter (SCM self)
   SCM progress, iter;
 
   progress = bkscm_make_block_syms_progress_smob ();
-  progress = gdbscm_scm_from_gsmob_unsafe (progress);
 
   iter = gdbscm_make_iterator (self, progress, bkscm_next_symbol_x_proc);
 
-  return gdbscm_scm_from_gsmob_unsafe (iter);
+  return iter;
 }
 
-/* Returns the next symbol in the iteration through the block's dictionary.
+/* Returns the next symbol in the iteration through the block's dictionary,
+   or (end-of-iteration).
    This is the iterator_smob.next_x method.  */
 
 static SCM
@@ -734,9 +684,9 @@ gdbscm_block_next_symbol_x (SCM self)
     sym = block_iterator_next (&p_smob->iter);
 
   if (sym == NULL)
-    return SCM_BOOL_F;
+    return gdbscm_end_of_iteration ();
 
-  return syscm_scm_from_symbol_unsafe (sym);
+  return syscm_scm_from_symbol (sym);
 }
 
 /* (lookup-block address) -> <gdb:block>
@@ -771,7 +721,7 @@ gdbscm_lookup_block (SCM pc_scm)
     }
 
   if (block != NULL)
-    return bkscm_scm_from_block_unsafe (block, symtab->objfile);
+    return bkscm_scm_from_block (block, symtab->objfile);
   return SCM_BOOL_F;
 }
 

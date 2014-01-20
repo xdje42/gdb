@@ -1,6 +1,6 @@
-/* GDB/Scheme smobs (gsmob is pronounced "gee smob")
+/* GDB/Scheme smobs (gsmob is pronounced "jee smob")
 
-   Copyright (C) 2013 Free Software Foundation, Inc.
+   Copyright (C) 2014 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -46,21 +46,9 @@
    gsmob first seeing if it's already in the table.  Eqable gsmobs can also be
    used where lifetime-tracking is required.
 
-   Gsmobs (and chained/eqable gsmobs) add an extra field that is unused by gdb:
-   "aux".  It is free to be used by the application as it chooses.
-
-   In addition to the "aux" field, the other way we allow for extending smobs
-   is by providing two hooks: *smob->scm, *scm->smob*.  They are either #f
-   or a procedure of one argument.
-   All Scheme objects coming out of GDB are passed through *smob->scm*
-   (if a procedure).  It can either return the original object or return any
-   object that contains the original object so that *scm->smob* can get it
-   back.
-   All Scheme objects passed to GDB are passed through *scm->smob*
-   (if a procedure and if necessary).  Its job is to return back the object
-   that was passed to *smob->scm*.
-   Ironically, the exception is <gdb:exception> smobs, for simplicity in
-   the code.  */
+   Gsmobs (and chained/eqable gsmobs) add an extra field that is used to
+   record extra data: "properties".  It is a table of key/value pairs
+   that can be set with set-gsmob-property!, gsmob-property.  */
 
 #include "defs.h"
 #include "hashtab.h"
@@ -73,11 +61,14 @@
 
 static htab_t registered_gsmobs;
 
-static const char scm_from_smob_name[] = "*smob->scm*";
-static const char scm_to_smob_name[] = "*scm->smob*";
-
-static SCM scm_from_smob_var;
-static SCM scm_to_smob_var;
+/* Gsmob properties are initialize stored as an alist to minimize space
+   usage: GDB can be used to debug some really big programs, and property
+   lists generally have very few elements.  Once the list grows to this
+   many elements then we switch to a hash table.
+   The smallest Guile hashtable in 2.0 uses a vector of 31 elements.
+   The value we use here is large enough to hold several expected uses,
+   without being so large that we might as well just use a hashtable.  */
+#define SMOB_PROP_HTAB_THRESHOLD 7
 
 /* Hash function for registered_gsmobs hash table.  */
 
@@ -140,7 +131,7 @@ gdbscm_make_smob_type (const char *name, size_t size)
 void
 gdbscm_init_gsmob (gdb_smob *base)
 {
-  base->aux = SCM_BOOL_F;
+  base->properties = SCM_EOL;
 }
 
 /* Initialize a chained_gdb_smob.
@@ -175,7 +166,7 @@ gdbscm_mark_gsmob (gdb_smob *base)
 {
   /* Return the last one to mark as an optimization.
      The marking infrastructure will mark it for us.  */
-  return base->aux;
+  return base->properties;
 }
 
 /* Call this from each smob's "mark" routine.
@@ -187,7 +178,7 @@ gdbscm_mark_chained_gsmob (chained_gdb_smob *base)
 {
   /* Return the last one to mark as an optimization.
      The marking infrastructure will mark it for us.  */
-  return base->aux;
+  return base->properties;
 }
 
 /* Call this from each smob's "mark" routine.
@@ -204,137 +195,21 @@ gdbscm_mark_eqable_gsmob (eqable_gdb_smob *base)
 
   /* Return the last one to mark as an optimization.
      The marking infrastructure will mark it for us.  */
-  return base->aux;
-}
-
-/* Given an SCM that is a gdb smob, call out to Scheme to convert it
-   to a possibly new SCM to return to the user.
-   The result is the result of calling the conversion function.
-   If *scm->smob* is #f then return SMOB unchanged.
-   If a Scheme exception was thrown during conversion a <gdb:exception>
-   object is returned.  */
-
-SCM
-gdbscm_scm_from_gsmob_safe (SCM smob)
-{
-  SCM proc, result;
-
-  proc = scm_variable_ref (scm_from_smob_var);
-  if (gdbscm_is_false (proc))
-    return smob;
-  /* We could check for whether PROC is a procedure here, but there's
-     no real need.  Let the safe call catch this.  */
-  result = gdbscm_safe_call_1 (proc, smob, NULL);
-
-  return result;
-}
-
-/* Wrapper around gdbscm_scm_from_gsmob_safe that will throw an exception
-   if there's a problem during the conversion.  */
-
-SCM
-gdbscm_scm_from_gsmob_unsafe (SCM smob)
-{
-  SCM result = gdbscm_scm_from_gsmob_safe (smob);
-
-  if (gdbscm_is_exception (result))
-    gdbscm_throw (result);
-
-  return result;
-}
-
-/* Return SCM if it matches TAG, or try to convert it to one.
-   If SCM can't be converted to the desired gsmob, and there was no error
-   during conversion, return #f.
-
-   TAG is the desired gsmob's tag.  If TAG is zero, then call *scm->smob* and
-   replace the smob predicate check with a check for whether the returned
-   object is any gsmob.
-
-   This performs the reverse operation that gdbscm_scm_from_gsmob_{,un}safe
-   perform.
-
-   The conversion function must return a smob of the original type (prior to
-   any *smob->scm* conversion) or #f if the object was not recognized.  Any
-   other value is an error.
-   If *smob->scm* is #f and SCM doesn't match TAG, return #f.
-
-   If a Scheme exception was thrown during conversion a <gdb:exception>
-   object is returned.  */
-
-SCM
-gdbscm_scm_to_gsmob_safe (SCM scm, scm_t_bits tag)
-{
-  SCM proc, result;
-
-  if (tag != 0)
-    {
-      if (SCM_SMOB_PREDICATE (tag, scm))
-	return scm;
-    }
-  else
-    {
-      if (gdbscm_is_gsmob (scm))
-	return scm;
-    }
-
-  proc = scm_variable_ref (scm_to_smob_var);
-  if (gdbscm_is_false (proc))
-    return SCM_BOOL_F;
-
-  /* We could check for whether PROC is a procedure here, but there's
-     no real need.  Let the safe call catch this.  */
-  result = gdbscm_safe_call_1 (proc, scm, NULL);
-
-  if (gdbscm_is_false (result))
-    return SCM_BOOL_F;
-  if (gdbscm_is_exception (result))
-    return result;
-  if (tag != 0)
-    {
-      if (SCM_SMOB_PREDICATE (tag, result))
-	return result;
-    }
-  else
-    {
-      if (gdbscm_is_gsmob (result))
-	return result;
-    }
-  return gdbscm_make_out_of_range_error (NULL, 0, result,
-		_("result of *scm->smob* must be requested gsmob or #f"));
-}
-
-/* Wrapper around gdbscm_scm_to_smob_safe that will throw an exception
-   if there's a problem during the conversion.  */
-
-SCM
-gdbscm_scm_to_gsmob_unsafe (SCM scm, scm_t_bits tag)
-{
-  SCM result = gdbscm_scm_to_gsmob_safe (scm, tag);
-
-  if (gdbscm_is_exception (result))
-    gdbscm_throw (result);
-
-  return result;
+  return base->properties;
 }
 
 /* gsmob accessors */
 
-/* Return the gsmob in SELF, passing through *scm->smob* if necessary.
-   Throws an exception if an error occurs during the conversion.  */
+/* Return the gsmob in SELF.
+   Throws an exception if SELF is not a gsmob.  */
 
 static SCM
 gsscm_get_gsmob_arg_unsafe (SCM self, int arg_pos, const char *func_name)
 {
-  SCM gsmob = gdbscm_scm_to_gsmob_safe (self, 0);
-
-  if (gdbscm_is_exception (gsmob))
-    gdbscm_throw (gsmob);
-
-  SCM_ASSERT_TYPE (gdbscm_is_gsmob (gsmob), self, arg_pos, func_name,
+  SCM_ASSERT_TYPE (gdbscm_is_gsmob (self), self, arg_pos, func_name,
 		   _("any gdb smob"));
 
-  return gsmob;
+  return self;
 }
 
 /* (gsmob-kind gsmob) -> symbol
@@ -355,16 +230,17 @@ gdbscm_gsmob_kind (SCM self)
   smobnum = SCM_SMOBNUM (smob);
   name = SCM_SMOBNAME (smobnum);
   kind = xstrprintf ("<%s>", name);
-  result = gdbscm_symbol_from_c_string (kind);
+  result = scm_from_latin1_symbol (kind);
   xfree (kind);
 
   return result;
 }
 
-/* (gsmob-aux gsmob) -> object */
+/* (gsmob-property gsmob property) -> object
+   If property isn't present then #f is returned.  */
 
 static SCM
-gdbscm_gsmob_aux (SCM self)
+gdbscm_gsmob_property (SCM self, SCM property)
 {
   SCM smob;
   gdb_smob *base;
@@ -372,22 +248,111 @@ gdbscm_gsmob_aux (SCM self)
   smob = gsscm_get_gsmob_arg_unsafe (self, SCM_ARG1, FUNC_NAME);
   base = (gdb_smob *) SCM_SMOB_DATA (self);
 
-  return base->aux;
+  /* Have we switched to a hash table?  */
+  if (gdbscm_is_true (scm_hash_table_p (base->properties)))
+    return scm_hashq_ref (base->properties, property, SCM_BOOL_F);
+
+  return scm_assq_ref (base->properties, property);
 }
 
-/* (set-gsmob-aux! gsmob object) -> unspecified */
+/* (set-gsmob-property! gsmob property new-value) -> unspecified */
 
 static SCM
-gdbscm_set_gsmob_aux_x (SCM self, SCM aux)
+gdbscm_set_gsmob_property_x (SCM self, SCM property, SCM new_value)
 {
-  SCM smob;
+  SCM smob, alist;
   gdb_smob *base;
 
   smob = gsscm_get_gsmob_arg_unsafe (self, SCM_ARG1, FUNC_NAME);
   base = (gdb_smob *) SCM_SMOB_DATA (self);
-  base->aux = aux;
 
+  /* Have we switched to a hash table?  */
+  if (gdbscm_is_true (scm_hash_table_p (base->properties)))
+    {
+      scm_hashq_set_x (base->properties, property, new_value);
+      return SCM_UNSPECIFIED;
+    }
+
+  alist = scm_assq_set_x (base->properties, property, new_value);
+
+  /* Did we grow the list?  */
+  if (!scm_is_eq (alist, base->properties))
+    {
+      /* If we grew the list beyond a threshold in size,
+	 switch to a hash table.  */
+      if (scm_ilength (alist) >= SMOB_PROP_HTAB_THRESHOLD)
+	{
+	  SCM elm, htab;
+
+	  htab = scm_c_make_hash_table (SMOB_PROP_HTAB_THRESHOLD);
+	  for (elm = alist; elm != SCM_EOL; elm = scm_cdr (elm))
+	    scm_hashq_set_x (htab, scm_caar (elm), scm_cdar (elm));
+	  base->properties = htab;
+	  return SCM_UNSPECIFIED;
+	}
+    }
+
+  base->properties = alist;
   return SCM_UNSPECIFIED;
+}
+
+/* (gsmob-has-property? gsmob property) -> boolean */
+
+static SCM
+gdbscm_gsmob_has_property_p (SCM self, SCM property)
+{
+  SCM smob, handle;
+  gdb_smob *base;
+
+  smob = gsscm_get_gsmob_arg_unsafe (self, SCM_ARG1, FUNC_NAME);
+  base = (gdb_smob *) SCM_SMOB_DATA (self);
+
+  if (gdbscm_is_true (scm_hash_table_p (base->properties)))
+    handle = scm_hashq_get_handle (base->properties, property);
+  else
+    handle = scm_assq (property, base->properties);
+
+  return scm_from_bool (gdbscm_is_true (handle));
+}
+
+/* Helper function for gdbscm_gsmob_properties.  */
+
+static SCM
+add_property_name (void *closure, SCM handle)
+{
+  SCM *resultp = closure;
+
+  *resultp = scm_cons (scm_car (handle), *resultp);
+  return SCM_UNSPECIFIED;
+}
+
+/* (gsmob-properties gsmob) -> list
+   The list is unsorted.  */
+
+static SCM
+gdbscm_gsmob_properties (SCM self)
+{
+  SCM smob, handle, result;
+  gdb_smob *base;
+
+  smob = gsscm_get_gsmob_arg_unsafe (self, SCM_ARG1, FUNC_NAME);
+  base = (gdb_smob *) SCM_SMOB_DATA (self);
+
+  result = SCM_EOL;
+  if (gdbscm_is_true (scm_hash_table_p (base->properties)))
+    {
+      scm_internal_hash_for_each_handle (add_property_name, &result,
+					 base->properties);
+    }
+  else
+    {
+      SCM elm;
+
+      for (elm = base->properties; elm != SCM_EOL; elm = scm_cdr (elm))
+	result = scm_cons (scm_caar (elm), result);
+    }
+
+  return result;
 }
 
 /* When underlying gdb data structures are deleted, we need to update any
@@ -485,41 +450,27 @@ gdbscm_clear_eqable_gsmob_ptr_slot (htab_t htab, eqable_gdb_smob *base)
 
 /* Initialize the Scheme gsmobs code.  */
 
-static const scheme_variable gsmob_variables[] =
-{
-  { scm_from_smob_name, SCM_BOOL_F,
-    /* Doc strings don't work as well for variables, maybe some day.  */
-    "\
-Either #f or a procedure called when creating a GDB smob.\n\
-The procedure takes one parameter, the smob, and typically returns\n\
-a modified representation of the object." },
-
-  { scm_to_smob_name, SCM_BOOL_F,
-    /* Doc strings don't work as well for variables, maybe some day.  */
-    "\
-Either #f or a procedure called when passing an object to GDB.\n\
-The procedure takes two parameters, the object and an object representing\n\
-the desired smob's class.  It must return an object of the specified smob\n\
-class.  The procedure is intended to undo the transformation that\n\
-*smob->scm* does." },
-
-  END_VARIABLES
-};
-
 static const scheme_function gsmob_functions[] =
 {
   { "gsmob-kind", 1, 0, 0, gdbscm_gsmob_kind,
     "\
 Return the kind of the smob, e.g., <gdb:breakpoint>, as a symbol." },
 
-  { "gsmob-aux", 1, 0, 0, gdbscm_gsmob_aux,
+  { "gsmob-property", 2, 0, 0, gdbscm_gsmob_property,
     "\
-Return the \"aux\" member of the object." },
+Return the specified property of the gsmob." },
 
-  { "set-gsmob-aux!", 2, 0, 0, gdbscm_set_gsmob_aux_x,
+  { "set-gsmob-property!", 3, 0, 0, gdbscm_set_gsmob_property_x,
     "\
-Set the \"aux\" member of any GDB smob.\n\
-The \"aux\" member is not used by GDB, the application is free to use it." },
+Set the specified property of the gsmob." },
+
+  { "gsmob-has-property?", 2, 0, 0, gdbscm_gsmob_has_property_p,
+    "\
+Return #t if the specified property is present." },
+
+  { "gsmob-properties", 1, 0, 0, gdbscm_gsmob_properties,
+    "\
+Return an unsorted list of names of properties." },
 
   END_FUNCTIONS
 };
@@ -531,11 +482,5 @@ gdbscm_initialize_smobs (void)
 					 hash_scm_t_bits, eq_scm_t_bits,
 					 NULL, xcalloc, xfree);
 
-  gdbscm_define_variables (gsmob_variables, 0);
   gdbscm_define_functions (gsmob_functions, 1);
-
-  scm_from_smob_var = scm_c_private_variable (gdbscm_module_name,
-					      scm_from_smob_name);
-  scm_to_smob_var = scm_c_private_variable (gdbscm_module_name,
-					    scm_to_smob_name);
 }

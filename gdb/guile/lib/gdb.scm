@@ -1,6 +1,6 @@
 ;; Scheme side of the gdb module.
 ;;
-;; Copyright (C) 2013 Free Software Foundation, Inc.
+;; Copyright (C) 2014 Free Software Foundation, Inc.
 ;;
 ;; This file is part of GDB.
 ;;
@@ -196,6 +196,8 @@
  iterator-progress
  set-iterator-progress!
  iterator-next!
+ end-of-iteration
+ end-of-iteration?
 
  ;; scm-lazy-string.c
  ;; FIXME: Where's the constructor?
@@ -249,6 +251,7 @@
  input-port
  output-port
  error-port
+ stdio-port?
  open-memory
  memory-port?
  memory-port-range
@@ -270,8 +273,10 @@
  ;; scm-smob.c
 
  gsmob-kind
- gsmob-aux
- set-gsmob-aux!
+ gsmob-property
+ set-gsmob-property!
+ gsmob-has-property?
+ gsmob-properties
 
  ;; scm-string.c
 

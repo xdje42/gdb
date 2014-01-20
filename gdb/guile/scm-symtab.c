@@ -1,6 +1,6 @@
 /* Scheme interface to symbol tables.
 
-   Copyright (C) 2008-2013 Free Software Foundation, Inc.
+   Copyright (C) 2008-2014 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -60,10 +60,6 @@ typedef struct
      clear GC will know the symtab_smob is referenced by us otherwise, and we
      need quick access to symtab_smob->symtab to know if this sal is valid.  */
   SCM symtab_scm;
-
-  /* The result of passing symtab_scm through *smob->scm*.
-     This is what we hand back to the user.  */
-  SCM converted_symtab_scm;
 
   /* The GDB symbol table and line structure.
      This object is ephemeral in GDB, so keep our own copy.
@@ -209,19 +205,15 @@ gdbscm_symtab_p (SCM scm)
   return scm_from_bool (stscm_is_symtab (scm));
 }
 
-/* Create a new <gdb:symtab> object that encapsulates SYMTAB.
-   If ST_SCM_PTR is non-NULL the unconverted <gdb:symtab> object is stored
-   there.
-   The object is passed through *smob->scm*.
-   A Scheme exception is thrown if there is an error.  */
+/* Create a new <gdb:symtab> object that encapsulates SYMTAB.  */
 
-static SCM
-stscm_scm_from_symtab_unsafe_1 (struct symtab *symtab, SCM *st_scm_ptr)
+SCM
+stscm_scm_from_symtab (struct symtab *symtab)
 {
   htab_t htab;
   eqable_gdb_smob **slot;
   symtab_smob *st_smob, st_smob_for_lookup;
-  SCM st_scm, result;
+  SCM st_scm;
 
   /* If we've already created a gsmob for this symtab, return it.
      This makes symtabs eq?-able.  */
@@ -229,66 +221,30 @@ stscm_scm_from_symtab_unsafe_1 (struct symtab *symtab, SCM *st_scm_ptr)
   st_smob_for_lookup.symtab = symtab;
   slot = gdbscm_find_eqable_gsmob_ptr_slot (htab, &st_smob_for_lookup.base);
   if (*slot != NULL)
-    {
-      result = (*slot)->containing_scm;
-      if (st_scm_ptr != NULL)
-	*st_scm_ptr = gdbscm_scm_to_gsmob_unsafe (result, symtab_smob_tag);
-      return result;
-    }
+    return (*slot)->containing_scm;
 
   st_scm = stscm_make_symtab_smob ();
   st_smob = (symtab_smob *) SCM_SMOB_DATA (st_scm);
   st_smob->symtab = symtab;
-  result = gdbscm_scm_from_gsmob_unsafe (st_scm);
-  gdbscm_fill_eqable_gsmob_ptr_slot (slot, &st_smob->base, result);
-  if (st_scm_ptr != NULL)
-    *st_scm_ptr = st_scm;
+  gdbscm_fill_eqable_gsmob_ptr_slot (slot, &st_smob->base, st_scm);
  
-  return result;
-}
-
-/* Create a new <gdb:symtab> object that encapsulates SYMTAB.
-   The object is passed through *smob->scm*.
-   A Scheme exception is thrown if there is an error.  */
-
-SCM
-stscm_scm_from_symtab_unsafe (struct symtab *symtab)
-{
-  return stscm_scm_from_symtab_unsafe_1 (symtab, NULL);
-}
-
-/* Returns the <gdb:symtab> object in SCM or #f if SCM is not a
-   <gdb:symtab> object.
-   Returns a <gdb:exception> object if there was a problem during the
-   conversion.  */
-
-static SCM
-stscm_scm_to_symtab_gsmob (SCM scm)
-{
-  return gdbscm_scm_to_gsmob_safe (scm, symtab_smob_tag);
+  return st_scm;
 }
 
 /* Returns the <gdb:symtab> object in SELF.
-   Throws an exception if SELF is not a <gdb:symtab> object
-   (after passing it through *scm->smob*).  */
+   Throws an exception if SELF is not a <gdb:symtab> object.  */
 
 static SCM
 stscm_get_symtab_arg_unsafe (SCM self, int arg_pos, const char *func_name)
 {
-  SCM st_scm = stscm_scm_to_symtab_gsmob (self);
-
-  if (gdbscm_is_exception (st_scm))
-    gdbscm_throw (st_scm);
-
-  SCM_ASSERT_TYPE (stscm_is_symtab (st_scm), self, arg_pos, func_name,
+  SCM_ASSERT_TYPE (stscm_is_symtab (self), self, arg_pos, func_name,
 		   symtab_smob_name);
 
-  return st_scm;
+  return self;
 }
 
 /* Returns a pointer to the symtab smob of SELF.
-   Throws an exception if SELF is not a <gdb:symtab> object
-   (after passing it through *scm->smob*).  */
+   Throws an exception if SELF is not a <gdb:symtab> object.  */
 
 static symtab_smob *
 stscm_get_symtab_smob_arg_unsafe (SCM self, int arg_pos, const char *func_name)
@@ -403,7 +359,7 @@ gdbscm_symtab_objfile (SCM self)
     = stscm_get_valid_symtab_smob_arg_unsafe (self, SCM_ARG1, FUNC_NAME);
   const struct symtab *symtab = st_smob->symtab;
 
-  return ofscm_scm_from_objfile_unsafe (symtab->objfile);
+  return ofscm_scm_from_objfile (symtab->objfile);
 }
 
 /* (symtab-global-block <gdb:symtab>) -> <gdb:block>
@@ -421,7 +377,7 @@ gdbscm_symtab_global_block (SCM self)
   blockvector = BLOCKVECTOR (symtab);
   block = BLOCKVECTOR_BLOCK (blockvector, GLOBAL_BLOCK);
 
-  return bkscm_scm_from_block_unsafe (block, symtab->objfile);
+  return bkscm_scm_from_block (block, symtab->objfile);
 }
 
 /* (symtab-static-block <gdb:symtab>) -> <gdb:block>
@@ -439,7 +395,7 @@ gdbscm_symtab_static_block (SCM self)
   blockvector = BLOCKVECTOR (symtab);
   block = BLOCKVECTOR_BLOCK (blockvector, STATIC_BLOCK);
 
-  return bkscm_scm_from_block_unsafe (block, symtab->objfile);
+  return bkscm_scm_from_block (block, symtab->objfile);
 }
 
 /* Administrivia for sal (symtab-and-line) smobs.  */
@@ -452,7 +408,7 @@ stscm_mark_sal_smob (SCM self)
   sal_smob *s_smob = (sal_smob *) SCM_SMOB_DATA (self);
 
   scm_gc_mark (s_smob->symtab_scm);
-  scm_gc_mark (s_smob->converted_symtab_scm);
+
   /* Do this last.  */
   return gdbscm_mark_gsmob (&s_smob->base);
 }
@@ -466,7 +422,6 @@ stscm_free_sal_smob (SCM self)
 
   /* Not necessary, done to catch bugs.  */
   s_smob->symtab_scm = SCM_UNDEFINED;
-  s_smob->converted_symtab_scm = SCM_UNDEFINED;
 
   return 0;
 }
@@ -501,7 +456,6 @@ stscm_make_sal_smob (void)
   SCM s_scm;
 
   s_smob->symtab_scm = SCM_BOOL_F;
-  s_smob->converted_symtab_scm = SCM_BOOL_F;
   memset (&s_smob->sal, 0, sizeof (s_smob->sal));
   s_scm = scm_new_smob (sal_smob_tag, (scm_t_bits) s_smob);
   gdbscm_init_gsmob (&s_smob->base);
@@ -525,64 +479,40 @@ gdbscm_sal_p (SCM scm)
   return scm_from_bool (stscm_is_sal (scm));
 }
 
-/* Create a new <gdb:sal> object that encapsulates SAL.
-   The object is passed through *smob->scm*.
-   A Scheme exception is thrown if there is an error.  */
+/* Create a new <gdb:sal> object that encapsulates SAL.  */
 
 SCM
-stscm_scm_from_sal_unsafe (struct symtab_and_line sal)
+stscm_scm_from_sal (struct symtab_and_line sal)
 {
-  SCM st_smob_scm, st_scm, s_scm;
+  SCM st_scm, s_scm;
   sal_smob *s_smob;
 
-  /* Do this first, it may throw an exception.  */
-  st_smob_scm = st_scm = SCM_BOOL_F;
+  st_scm = SCM_BOOL_F;
   if (sal.symtab != NULL)
-    st_scm = stscm_scm_from_symtab_unsafe_1 (sal.symtab, &st_smob_scm);
+    st_scm = stscm_scm_from_symtab (sal.symtab);
 
   s_scm = stscm_make_sal_smob ();
   s_smob = (sal_smob *) SCM_SMOB_DATA (s_scm);
-  if (sal.symtab != NULL)
-    {
-      s_smob->symtab_scm = st_smob_scm;
-      s_smob->converted_symtab_scm = st_scm;
-    }
+  s_smob->symtab_scm = st_scm;
   s_smob->sal = sal;
-
-  return gdbscm_scm_from_gsmob_unsafe (s_scm);
-}
-
-/* Returns the <gdb:sal> object in SCM or #f if SCM is not a <gdb:sal> object.
-   Returns a <gdb:exception> object if there was a problem during the
-   conversion.  */
-
-static SCM
-stscm_scm_to_sal_gsmob (SCM scm)
-{
-  return gdbscm_scm_to_gsmob_safe (scm, sal_smob_tag);
-}
-
-/* Returns the <gdb:sal> object in SELF.
-   Throws an exception if SELF is not a <gdb:sal> object
-   (after passing it through *scm->smob*).  */
-
-static SCM
-stscm_get_sal_arg (SCM self, int arg_pos, const char *func_name)
-{
-  SCM s_scm = stscm_scm_to_sal_gsmob (self);
-
-  if (gdbscm_is_exception (s_scm))
-    gdbscm_throw (s_scm);
-
-  SCM_ASSERT_TYPE (stscm_is_sal (s_scm), self, arg_pos, func_name,
-		   sal_smob_name);
 
   return s_scm;
 }
 
+/* Returns the <gdb:sal> object in SELF.
+   Throws an exception if SELF is not a <gdb:sal> object.  */
+
+static SCM
+stscm_get_sal_arg (SCM self, int arg_pos, const char *func_name)
+{
+  SCM_ASSERT_TYPE (stscm_is_sal (self), self, arg_pos, func_name,
+		   sal_smob_name);
+
+  return self;
+}
+
 /* Returns a pointer to the sal smob of SELF.
-   Throws an exception if SELF is not a <gdb:sal> object
-   (after passing it through *scm->smob*).  */
+   Throws an exception if SELF is not a <gdb:sal> object.  */
 
 static sal_smob *
 stscm_get_sal_smob_arg (SCM self, int arg_pos, const char *func_name)
@@ -687,7 +617,7 @@ gdbscm_sal_symtab (SCM self)
   sal_smob *s_smob = stscm_get_valid_sal_smob_arg (self, SCM_ARG1, FUNC_NAME);
   const struct symtab_and_line *sal = &s_smob->sal;
 
-  return s_smob->converted_symtab_scm;
+  return s_smob->symtab_scm;
 }
 
 /* (find-pc-line address) -> <gdb:sal> */
@@ -696,7 +626,6 @@ static SCM
 gdbscm_find_pc_line (SCM pc_scm)
 {
   ULONGEST pc_ull;
-  SCM result = SCM_BOOL_F; /* -Wall */
   struct symtab_and_line sal;
   volatile struct gdb_exception except;
 
@@ -712,9 +641,7 @@ gdbscm_find_pc_line (SCM pc_scm)
     }
   GDBSCM_HANDLE_GDB_EXCEPTION (except);
 
-  result = stscm_scm_from_sal_unsafe (sal);
-
-  return result;
+  return stscm_scm_from_sal (sal);
 }
 
 /* Initialize the Scheme symbol support.  */

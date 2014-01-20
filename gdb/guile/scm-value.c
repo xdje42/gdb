@@ -1,6 +1,6 @@
 /* Scheme interface to values.
 
-   Copyright (C) 2008-2013 Free Software Foundation, Inc.
+   Copyright (C) 2008-2014 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -72,6 +72,11 @@ static SCM type_keyword;
 static SCM encoding_keyword;
 static SCM errors_keyword;
 static SCM length_keyword;
+
+/* Possible #:errors values.  */
+static SCM error_symbol;
+static SCM escape_symbol;
+static SCM substitute_symbol;
 
 /* Administrivia for value smobs.  */
 
@@ -255,11 +260,8 @@ gdbscm_value_p (SCM scm)
 }
 
 /* Create a new <gdb:value> object that encapsulates VALUE.
-   The object is passed through *smob->scm*.
    The value is released from the all_values chain so its lifetime is not
-   bound to the execution of a command.
-   Returns a <gdb:exception> object if there was a problem during the
-   conversion.  */
+   bound to the execution of a command.  */
 
 SCM
 vlscm_scm_from_value (struct value *value)
@@ -268,71 +270,28 @@ vlscm_scm_from_value (struct value *value)
      conversion worked.  */
   SCM v_scm = vlscm_make_value_smob ();
   value_smob *v_smob = (value_smob *) SCM_SMOB_DATA (v_scm);
-  SCM result;
 
-  /* Set this before calling out to Scheme to perform any conversion so
-     that the conversion routine can see the value.  */
   v_smob->value = value;
-
-  result = gdbscm_scm_from_gsmob_safe (v_scm);
-
-  if (gdbscm_is_exception (result))
-    return result;
-
   release_value_or_incref (value);
   vlscm_remember_scheme_value (v_smob);
-
-  return result;
-}
-
-/* Create a new <gdb:value> object that encapsulates VALUE.
-   The object is passed through *smob->scm*.
-   The value is released from the all_values chain so its lifetime is not
-   bound to the execution of a command.
-   A Scheme exception is thrown if there is an error.  */
-
-SCM
-vlscm_scm_from_value_unsafe (struct value *value)
-{
-  SCM result = vlscm_scm_from_value (value);
-
-  if (gdbscm_is_exception (result))
-    gdbscm_throw (result);
-  return result;
-}
-
-/* Returns the <gdb:value> object in SCM or #f if SCM is not a
-   <gdb:value> object.
-   Returns a <gdb:exception> object if there was a problem during the
-   conversion.  */
-
-SCM
-vlscm_scm_to_value_gsmob (SCM scm)
-{
-  return gdbscm_scm_to_gsmob_safe (scm, value_smob_tag);
-}
-
-/* Returns the <gdb:value> object in SELF.
-   Throws an exception if SELF is not a <gdb:value> object
-   (after passing it through *scm->smob*).  */
-
-static SCM
-vlscm_get_value_arg_unsafe (SCM self, int arg_pos, const char *func_name)
-{
-  SCM v_scm = vlscm_scm_to_value_gsmob (self);
-
-  if (gdbscm_is_exception (v_scm))
-    gdbscm_throw (v_scm);
-
-  SCM_ASSERT_TYPE (vlscm_is_value (v_scm), self, arg_pos, func_name,
-		   value_smob_name);
 
   return v_scm;
 }
 
+/* Returns the <gdb:value> object in SELF.
+   Throws an exception if SELF is not a <gdb:value> object.  */
+
+static SCM
+vlscm_get_value_arg_unsafe (SCM self, int arg_pos, const char *func_name)
+{
+  SCM_ASSERT_TYPE (vlscm_is_value (self), self, arg_pos, func_name,
+		   value_smob_name);
+
+  return self;
+}
+
 /* Returns a pointer to the value smob of SELF.
-   Throws an exception if SELF is not a <gdb:value> object
-   (after passing it through *scm->smob*).  */
+   Throws an exception if SELF is not a <gdb:value> object.  */
 
 static value_smob *
 vlscm_get_value_smob_arg_unsafe (SCM self, int arg_pos, const char *func_name)
@@ -592,7 +551,7 @@ gdbscm_value_type (SCM self)
   struct value *value = v_smob->value;
 
   if (SCM_UNBNDP (v_smob->type))
-    v_smob->type = tyscm_scm_from_type_unsafe (value_type (value));
+    v_smob->type = tyscm_scm_from_type (value_type (value));
 
   return v_smob->type;
 }
@@ -652,7 +611,7 @@ gdbscm_value_dynamic_type (SCM self)
   if (type == NULL)
     v_smob->dynamic_type = gdbscm_value_type (self);
   else
-    v_smob->dynamic_type = tyscm_scm_from_type_unsafe (type);
+    v_smob->dynamic_type = tyscm_scm_from_type (type);
 
   return v_smob->dynamic_type;
 }
@@ -1059,16 +1018,22 @@ gdbscm_value_to_real (SCM self)
 
 /* (value->string <gdb:value>
        [#:encoding encoding]
-       [#:errors "strict" | "replace"]
+       [#:errors #f | 'error | 'substitute]
        [#:length length])
      -> string
    Return Unicode string with value's contents, which must be a string.
+
    If ENCODING is not given, the string is assumed to be encoded in
    the target's charset.
-   ERRORS is one of "strict" and "replace" (copied from Python).
-   An error setting "strict" causes an exception to be thrown if there's
-   a decoding error.  An error setting of "replace" causes invalid characters
-   to be replaced with "?".  The default is "strict".
+
+   ERRORS is one of #f, 'error or 'substitute.
+   An error setting of #f means use the default, which is
+   Guile's %default-port-conversion-strategy.  If the default is not one
+   of 'error or 'substitute, 'substitute is used.
+   An error setting of "error" causes an exception to be thrown if there's
+   a decoding error.  An error setting of "substitute" causes invalid
+   characters to be replaced with "?".
+
    If LENGTH is provided, only fetch string to the length provided.
    LENGTH must be a Scheme integer, it can't be a <gdb:value> integer.  */
 
@@ -1083,7 +1048,7 @@ gdbscm_value_to_string (SCM self, SCM rest)
   };
   int encoding_arg_pos = -1, errors_arg_pos = -1, length_arg_pos = -1;
   char *encoding = NULL;
-  char *errors = NULL;
+  SCM errors = SCM_BOOL_F;
   int length = -1;
   gdb_byte *buffer = NULL;
   const char *la_encoding = NULL;
@@ -1095,25 +1060,29 @@ gdbscm_value_to_string (SCM self, SCM rest)
   /* The sequencing here, as everywhere else, is important.
      We can't have existing cleanups when a Scheme exception is thrown.  */
 
-  gdbscm_parse_function_args (FUNC_NAME, SCM_ARG2, keywords, "#ssi", rest,
+  gdbscm_parse_function_args (FUNC_NAME, SCM_ARG2, keywords, "#sOi", rest,
 			      &encoding_arg_pos, &encoding,
 			      &errors_arg_pos, &errors,
 			      &length_arg_pos, &length);
 
   cleanups = make_cleanup (xfree, encoding);
-  make_cleanup (xfree, errors);
 
-  if (errors != NULL
-      && strcmp (errors, "strict") != 0
-      && strcmp (errors, "replace") != 0)
+  if (errors_arg_pos > 0
+      && errors != SCM_BOOL_F
+      && !scm_is_eq (errors, error_symbol)
+      && !scm_is_eq (errors, substitute_symbol))
     {
-      result
-	= gdbscm_make_out_of_range_error (FUNC_NAME, errors_arg_pos,
-					  gdbscm_scm_from_c_string (errors),
+      SCM excp
+	= gdbscm_make_out_of_range_error (FUNC_NAME, errors_arg_pos, errors,
 					  _("invalid error kind"));
+
       do_cleanups (cleanups);
-      gdbscm_throw (result);
+      gdbscm_throw (excp);
     }
+  if (errors == SCM_BOOL_F)
+    errors = scm_port_conversion_strategy (SCM_BOOL_F);
+  /* We don't assume anything about the result of scm_port_conversion_strategy.
+     From this point on, if errors is not 'errors, use 'substitute.  */
 
   TRY_CATCH (except, RETURN_MASK_ALL)
     {
@@ -1121,14 +1090,13 @@ gdbscm_value_to_string (SCM self, SCM rest)
     }
   GDBSCM_HANDLE_GDB_EXCEPTION_WITH_CLEANUPS (except, cleanups);
 
-  /* If errors is "strict" scm_from_stringn will throw a Scheme exception.
+  /* If errors is "error" scm_from_stringn may throw a Scheme exception.
      Make sure we don't leak.  This is done via scm_dynwind_begin, et.al.  */
   discard_cleanups (cleanups);
 
   scm_dynwind_begin (0);
 
   gdbscm_dynwind_xfree (encoding);
-  gdbscm_dynwind_xfree (errors);
   gdbscm_dynwind_xfree (buffer);
 
   result = scm_from_stringn ((const char *) buffer,
@@ -1136,7 +1104,7 @@ gdbscm_value_to_string (SCM self, SCM rest)
 			     (encoding != NULL && *encoding != '\0'
 			      ? encoding
 			      : la_encoding),
-			     errors == NULL || strcmp (errors, "strict") == 0
+			     scm_is_eq (errors, error_symbol)
 			     ? SCM_FAILED_CONVERSION_ERROR
 			     : SCM_FAILED_CONVERSION_QUESTION_MARK);
 
@@ -1327,7 +1295,7 @@ gdbscm_history_ref (SCM index)
     }
   GDBSCM_HANDLE_GDB_EXCEPTION (except);
 
-  return vlscm_scm_from_value_unsafe (res_val);
+  return vlscm_scm_from_value (res_val);
 }
 
 /* Initialize the Scheme value code.  */
@@ -1443,13 +1411,13 @@ No transformation, endian or otherwise, is performed." },
 Return the Unicode string of the value's contents.\n\
 If ENCODING is not given, the string is assumed to be encoded in\n\
 the target's charset.\n\
-An error setting \"strict\" causes an exception to be thrown if there's\n\
-a decoding error.  An error setting of \"replace\" causes invalid characters\n\
-to be replaced with \"?\".  The default is \"strict\".\n\
+An error setting \"error\" causes an exception to be thrown if there's\n\
+a decoding error.  An error setting of \"substitute\" causes invalid\n\
+characters to be replaced with \"?\".  The default is \"error\".\n\
 If LENGTH is provided, only fetch string to the length provided.\n\
 \n\
   Arguments: <gdb:value>\n\
-             [#:encoding encoding] [#:errors \"strict\"|\"replace\"\n\
+             [#:encoding encoding] [#:errors \"error\"|\"substitute\"]\n\
              [#:length length]" },
 
   { "value->lazy-string", 1, 0, 1, gdbscm_value_to_lazy_string,
@@ -1510,4 +1478,8 @@ gdbscm_initialize_values (void)
   encoding_keyword = scm_from_latin1_keyword ("encoding");
   errors_keyword = scm_from_latin1_keyword ("errors");
   length_keyword = scm_from_latin1_keyword ("length");
+
+  error_symbol = scm_from_latin1_symbol ("error");
+  escape_symbol = scm_from_latin1_symbol ("escape");
+  substitute_symbol = scm_from_latin1_symbol ("substitute");
 }

@@ -1,4 +1,4 @@
-# Copyright (C) 2008-2013 Free Software Foundation, Inc.
+# Copyright (C) 2008-2014 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -195,20 +195,28 @@ proc test_make_typed_int_value { size } {
     set max [get_max_int $size]
     set min [get_min_int $size]
     set umax [get_max_uint $size]
+
     gdb_test "gu (print (make-value $max #:type (arch-${name}-type arch)))" \
 	"= $max" "test make-value $name $size max"
     gdb_test "gu (print (make-value $min #:type (arch-${name}-type arch)))" \
 	"= $min" "test make-value $name $size min"
     gdb_test "gu (print (make-value $umax #:type (arch-${uname}-type arch)))" \
 	"= $umax" "test make-value $uname $size umax"
+
+    gdb_test "gu (print (make-value (+ $max 1) #:type (arch-${name}-type arch)))" \
+	"ERROR.*Out of range.*" "test make-value $name $size max+1"
+    gdb_test "gu (print (make-value (- $min 1) #:type (arch-${name}-type arch)))" \
+	"ERROR.*Out of range.*" "test make-value $name $size min-1"
+    gdb_test "gu (print (make-value (+ $umax 1) #:type (arch-${uname}-type arch)))" \
+	"ERROR.*Out of range.*" "test make-value $uname $size umax+1"
 }
 
 proc test_value_numeric_ranges {} {
     # We can't assume anything about sizeof (int), etc. on the target.
     # Keep it simple for now, this will cover everything important for
     # the major targets.
-    set int_size [get_integer_valueof "sizeof (int)" 0]
-    set long_size [get_integer_valueof "sizeof (long)" 0]
+    set int_size [get_sizeof "int" 0]
+    set long_size [get_sizeof "long" 0]
     gdb_test_no_output "gu (define arch (current-arch))"
 
     if { $int_size == 4 } {

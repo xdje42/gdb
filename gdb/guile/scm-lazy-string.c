@@ -1,6 +1,6 @@
 /* Scheme interface to lazy strings.
 
-   Copyright (C) 2010-2013 Free Software Foundation, Inc.
+   Copyright (C) 2010-2014 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -111,8 +111,8 @@ lsscm_print_lazy_string_smob (SCM self, SCM port, scm_print_state *pstate)
    The caller must verify !(address == 0 && length != 0).  */
 
 static SCM
-lsscm_make_lazy_string_gsmob (CORE_ADDR address, int length,
-			      const char *encoding, struct type *type)
+lsscm_make_lazy_string_smob (CORE_ADDR address, int length,
+			     const char *encoding, struct type *type)
 {
   lazy_string_smob *ls_smob = (lazy_string_smob *)
     scm_gc_malloc (sizeof (lazy_string_smob), lazy_string_smob_name);
@@ -154,15 +154,12 @@ gdbscm_lazy_string_p (SCM scm)
 }
 
 /* Main entry point to create a <gdb:lazy-string> object.
-   The result is passed through *smob->scm*.
    If there's an error a <gdb:exception> object is returned.  */
 
 SCM
 lsscm_make_lazy_string (CORE_ADDR address, int length,
 			const char *encoding, struct type *type)
 {
-  SCM lstring;
-
   if (address == 0 && length != 0)
     {
       return gdbscm_make_out_of_range_error
@@ -177,38 +174,19 @@ lsscm_make_lazy_string (CORE_ADDR address, int length,
 	(NULL, 0, scm_from_int (0), _("a lazy string's type cannot be NULL"));
     }
 
-  lstring = lsscm_make_lazy_string_gsmob (address, length, encoding, type);
-
-  return gdbscm_scm_from_gsmob_safe (lstring);
-}
-
-/* Returns the <gdb:lazy-string> object contained in SCM or #f if SCM is not a
-   <gdb:lazy-string> object.
-   Returns a <gdb:exception> object if there was a problem during the
-   conversion.  */
-
-SCM
-lsscm_scm_to_lazy_string_gsmob (SCM scm)
-{
-  return gdbscm_scm_to_gsmob_safe (scm, lazy_string_smob_tag);
+  return lsscm_make_lazy_string_smob (address, length, encoding, type);
 }
 
 /* Returns the <gdb:lazy-string> smob in SELF.
-   Throws an exception if SELF is not a <gdb:lazy-string> object
-   (after passing it through *scm->smob*).  */
+   Throws an exception if SELF is not a <gdb:lazy-string> object.  */
 
 static SCM
 lsscm_get_lazy_string_arg_unsafe (SCM self, int arg_pos, const char *func_name)
 {
-  SCM ls_scm = lsscm_scm_to_lazy_string_gsmob (self);
-
-  if (gdbscm_is_exception (ls_scm))
-    gdbscm_throw (ls_scm);
-
-  SCM_ASSERT_TYPE (lsscm_is_lazy_string (ls_scm), self, arg_pos, func_name,
+  SCM_ASSERT_TYPE (lsscm_is_lazy_string (self), self, arg_pos, func_name,
 		   lazy_string_smob_name);
 
-  return ls_scm;
+  return self;
 }
 
 /* Lazy string methods.  */
@@ -258,7 +236,7 @@ gdbscm_lazy_string_type (SCM self)
   SCM ls_scm = lsscm_get_lazy_string_arg_unsafe (self, SCM_ARG1, FUNC_NAME);
   lazy_string_smob *ls_smob = (lazy_string_smob *) SCM_SMOB_DATA (ls_scm);
 
-  return tyscm_scm_from_type_unsafe (ls_smob->type);
+  return tyscm_scm_from_type (ls_smob->type);
 }
 
 /* (lazy-string->value <gdb:lazy-string>) -> <gdb:value> */
@@ -283,7 +261,7 @@ gdbscm_lazy_string_to_value (SCM self)
     }
   GDBSCM_HANDLE_GDB_EXCEPTION (except);
 
-  return vlscm_scm_from_value_unsafe (value);
+  return vlscm_scm_from_value (value);
 }
 
 /* A "safe" version of gdbscm_lazy_string_to_value for use by
@@ -332,8 +310,7 @@ lsscm_safe_lazy_string_to_value (SCM string, int arg_pos,
 }
 
 /* Print a lazy string to STREAM using val_print_string.
-   STRING must be a <gdb:lazy-string> object: If needed, the caller
-   must do the *scm->smob* conversion.  */
+   STRING must be a <gdb:lazy-string> object.  */
 
 void
 lsscm_val_print_lazy_string (SCM string, struct ui_file *stream,

@@ -1,8 +1,4 @@
-;; Bootstrap the Scheme side of the gdb module.
-;;
 ;; Copyright (C) 2014 Free Software Foundation, Inc.
-;;
-;; This file is part of GDB.
 ;;
 ;; This program is free software; you can redistribute it and/or modify
 ;; it under the terms of the GNU General Public License as published by
@@ -17,15 +13,7 @@
 ;; You should have received a copy of the GNU General Public License
 ;; along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-;; This file is loaded with scm_c_primitive_load, which is ok, but files
-;; loaded with it are not compiled.  So we do very little here, and do
-;; most of the initialization elsewhere.
+(use-modules (gdb))
 
-;; data-directory is provided by the C code.
-(load (string-append
-       (data-directory) file-name-separator-string "guile"
-       file-name-separator-string "gdb.scm"))
-
-;; Now that the Scheme side support is loaded, initialize it.
-(let ((init-proc (@@ (gdb init) %initialize!)))
-  (init-proc))
+;; An intentional error to test error handling when loading a file.
+(define foo (+ 42 #f))

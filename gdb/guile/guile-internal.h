@@ -1,6 +1,6 @@
 /* Internal header for GDB/Scheme code.
 
-   Copyright (C) 2013 Free Software Foundation, Inc.
+   Copyright (C) 2014 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -149,8 +149,6 @@ extern SCM gdbscm_scm_from_ulongest (ULONGEST l);
 
 extern ULONGEST gdbscm_scm_to_ulongest (SCM u);
 
-extern SCM gdbscm_symbol_from_c_string (const char *symbol);
-
 extern void gdbscm_dynwind_xfree (void *ptr);
 
 extern int gdbscm_is_procedure (SCM proc);
@@ -173,8 +171,8 @@ extern int gdbscm_is_procedure (SCM proc);
    to ensure this.  */
 
 #define GDB_SMOB_HEAD					\
-  /* An auxiliary object for use by the user.  */	\
-  SCM aux;
+  /* Property list for externally added fields.  */	\
+  SCM properties;
 
 typedef struct
 {
@@ -228,14 +226,6 @@ extern SCM gdbscm_mark_gsmob (gdb_smob *base);
 extern SCM gdbscm_mark_chained_gsmob (chained_gdb_smob *base);
 
 extern SCM gdbscm_mark_eqable_gsmob (eqable_gdb_smob *base);
-
-extern SCM gdbscm_scm_from_gsmob_safe (SCM smob);
-
-extern SCM gdbscm_scm_from_gsmob_unsafe (SCM smob);
-
-extern SCM gdbscm_scm_to_gsmob_safe (SCM scm, scm_t_bits tag);
-
-extern SCM gdbscm_scm_to_gsmob_unsafe (SCM scm, scm_t_bits tag);
 
 extern void gdbscm_add_objfile_ref (struct objfile *objfile,
 				    const struct objfile_data *data_key,
@@ -305,13 +295,10 @@ extern SCM gdbscm_scm_from_gdb_exception (struct gdb_exception exception);
 extern void gdbscm_throw_gdb_exception (struct gdb_exception exception)
   ATTRIBUTE_NORETURN;
 
-extern void gdbscm_print_exception_message (SCM port, SCM frame, SCM key,
-					    SCM args);
+extern void gdbscm_print_exception_with_stack (SCM port, SCM stack,
+					       SCM key, SCM args);
 
-extern void gdbscm_print_exception_with_args (SCM port, SCM stack, SCM key,
-					      SCM args);
-
-extern void gdbscm_print_exception (SCM port, SCM exception);
+extern void gdbscm_print_gdb_exception (SCM port, SCM exception);
 
 extern char *gdbscm_exception_message_to_string (SCM exception);
 
@@ -370,8 +357,8 @@ extern SCM arscm_scm_from_arch (struct gdbarch *gdbarch);
 
 /* scm-block.c */
 
-extern SCM bkscm_scm_from_block_unsafe (const struct block *block,
-					struct objfile *objfile);
+extern SCM bkscm_scm_from_block (const struct block *block,
+				 struct objfile *objfile);
 
 extern const struct block *bkscm_scm_to_block
   (SCM block_scm, int arg_pos, const char *func_name, SCM *excp);
@@ -404,7 +391,9 @@ extern SCM gdbscm_make_iterator (SCM object, SCM progress, SCM next);
 
 extern int itscm_is_iterator (SCM scm);
 
-extern SCM itscm_scm_to_iterator_gsmob (SCM scm);
+extern SCM gdbscm_end_of_iteration (void);
+
+extern int itscm_is_end_of_iteration (SCM obj);
 
 extern SCM itscm_safe_call_next_x (SCM iter, excp_matcher_func *ok_excps);
 
@@ -414,8 +403,6 @@ extern SCM itscm_get_iterator_arg_unsafe (SCM self, int arg_pos,
 /* scm-lazy-string.c */
 
 extern int lsscm_is_lazy_string (SCM scm);
-
-extern SCM lsscm_scm_to_lazy_string_gsmob (SCM scm);
 
 extern SCM lsscm_make_lazy_string (CORE_ADDR address, int length,
 				   const char *encoding, struct type *type);
@@ -437,7 +424,7 @@ extern SCM ofscm_objfile_smob_pretty_printers (objfile_smob *o_smob);
 
 extern objfile_smob *ofscm_objfile_smob_from_objfile (struct objfile *objfile);
 
-extern SCM ofscm_scm_from_objfile_unsafe (struct objfile *objfile);
+extern SCM ofscm_scm_from_objfile (struct objfile *objfile);
 
 /* scm-string.c */
 
@@ -451,6 +438,9 @@ extern char *gdbscm_scm_to_string (SCM string, size_t *lenp,
 				   const char *charset,
 				   int strict, SCM *except_scmp);
 
+extern SCM gdbscm_scm_from_string (const char *string, size_t len,
+				   const char *charset, int strict);
+
 extern char *gdbscm_scm_to_target_string_unsafe (SCM string, size_t *lenp,
 						 struct gdbarch *gdbarch);
 
@@ -458,20 +448,16 @@ extern char *gdbscm_scm_to_target_string_unsafe (SCM string, size_t *lenp,
 
 extern int syscm_is_symbol (SCM scm);
 
-extern SCM syscm_gsmob_from_symbol (struct symbol *symbol);
-
-extern SCM syscm_scm_from_symbol_unsafe (struct symbol *symbol);
-
-extern SCM syscm_scm_to_symbol_gsmob (SCM scm);
+extern SCM syscm_scm_from_symbol (struct symbol *symbol);
 
 extern struct symbol *syscm_get_valid_symbol_arg_unsafe
   (SCM self, int arg_pos, const char *func_name);
 
 /* scm-symtab.c */
 
-extern SCM stscm_scm_from_symtab_unsafe (struct symtab *symtab);
+extern SCM stscm_scm_from_symtab (struct symtab *symtab);
 
-extern SCM stscm_scm_from_sal_unsafe (struct symtab_and_line sal);
+extern SCM stscm_scm_from_sal (struct symtab_and_line sal);
 
 /* scm-type.c */
 
@@ -479,16 +465,14 @@ typedef struct _type_smob type_smob;
 
 extern int tyscm_is_type (SCM scm);
 
-extern SCM tyscm_scm_from_type_unsafe (struct type *type);
+extern SCM tyscm_scm_from_type (struct type *type);
 
 extern type_smob *tyscm_get_type_smob_arg_unsafe (SCM type_scm, int arg_pos,
 						  const char *func_name);
 
 extern struct type *tyscm_type_smob_type (type_smob *t_smob);
 
-extern SCM tyscm_gsmob_from_field (SCM type_scm, int field_num);
-
-extern SCM tyscm_scm_from_field_unsafe (SCM type_scm, int field_num);
+extern SCM tyscm_scm_from_field (SCM type_scm, int field_num);
 
 /* scm-value.c */
 
@@ -499,8 +483,6 @@ extern int vlscm_is_value (SCM scm);
 extern SCM vlscm_scm_from_value (struct value *value);
 
 extern SCM vlscm_scm_from_value_unsafe (struct value *value);
-
-extern SCM vlscm_scm_to_value_gsmob (SCM scm);
 
 extern struct value *vlscm_convert_typed_value_from_scheme
   (const char *func_name, int obj_arg_pos, SCM obj,

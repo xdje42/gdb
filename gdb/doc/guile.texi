@@ -1,3 +1,15 @@
+@c Copyright (C) 2008-2014 Free Software Foundation, Inc.
+@c Permission is granted to copy, distribute and/or modify this document
+@c under the terms of the GNU Free Documentation License, Version 1.3 or
+@c any later version published by the Free Software Foundation; with the
+@c Invariant Sections being ``Free Software'' and ``Free Software Needs
+@c Free Documentation'', with the Front-Cover Texts being ``A GNU Manual,''
+@c and with the Back-Cover Texts as in (a) below.
+@c 
+@c (a) The FSF's Back-Cover Text is: ``You are free to copy and modify
+@c this GNU Manual.  Buying copies from GNU Press supports the FSF in
+@c developing GNU and promoting software freedom.''
+
 @node Guile
 @section Extending @value{GDBN} using Guile
 @cindex guile scripting
@@ -28,13 +40,14 @@ However, some things are done differently where it makes sense.
 
 @value{GDBN} requires Guile version 2.0 or greater.
 Older versions are not supported.
-Guile version 2.0.9 is well tested, earlier 2.0 versions are not.
 
-The implementation uses Guile's @code{smob} (small object)
-data type for all @value{GDBN} objects.  This allows gluing Guile
-into @value{GDBN} very easily.
+@cindex guile smobs
+The implementation uses Guile's @dfn{smob} (small object)
+data type for all @value{GDBN} objects
+(@pxref{Defining New Types (Smobs),,, guile, GNU Guile Reference Manual}).
+This allows gluing Guile into @value{GDBN} very easily.
 
-@cindex guile directory
+@cindex guile scripts directory
 Guile scripts used by @value{GDBN} should be installed in
 @file{@var{data-directory}/guile}, where @var{data-directory} is
 the data directory as determined at @value{GDBN} startup (@pxref{Data Files}).
@@ -50,19 +63,19 @@ the Guile interpreter to locate all scripts installed at this location.
 @value{GDBN} provides two commands for accessing the Guile interpreter:
 
 @table @code
-@kindex guile-interactive
-@kindex gi
-@item guile-interactive
-@itemx gi
-The @code{guile-interactive} command can be used
-to start an interactive Guile prompt.  To return to @value{GDBN},
+@kindex guile-repl
+@kindex gr
+@item guile-repl
+@itemx gr
+The @code{guile-repl} command can be used to start an interactive
+Guile prompt or @dfn{repl}.  To return to @value{GDBN},
 type @kbd{,q} or the @code{EOF} character (e.g., @kbd{Ctrl-D} on
 an empty prompt).  These commands do not take any arguments.
 
 @kindex guile
 @kindex gu
-@item guile @r{[}@var{command}@r{]}
-@itemx gu @r{[}@var{command}@r{]}
+@item guile @r{[}@var{scheme-expression}@r{]}
+@itemx gu @r{[}@var{scheme-expression}@r{]}
 The @code{guile} command can be used to evaluate a Scheme expression.
 
 If given an argument, @value{GDBN} will pass the argument to the Guile
@@ -108,6 +121,7 @@ the @code{script-extension} setting.  @xref{Extending GDB, ,Extending GDB}.
 This method uses the @code{load} Guile function.
 It takes a string argument that is the name of the script to load.
 See the Guile documentation for a description of this function.
+(@pxref{Loading,,, guile, GNU Guile Reference Manual}).
 @end table
 
 @node Guile API
@@ -125,6 +139,7 @@ from the Guile interactive prompt.
 @menu
 * Basic Guile::              Basic Guile Functions
 * Guile Configuration::      Guile configuration variables
+* GDB Smobs::                Functions for all GDB smobs
 * Guile Exception Handling:: How Guile exceptions are translated
 * Values From Inferior In Guile:: Guile representation of values
 * Arithmetic In Guile::      Arithmetic in Guile
@@ -159,12 +174,12 @@ situation, a Guile @code{signal} exception is thrown with value @code{SIGINT}.
 
 Guile's history mechanism uses the same naming as @value{GDBN}'s,
 namely the user of dollar-variables (e.g., $1, $2, etc.).
-However, the values are independent, @code{$1} in Guile is not the
-same value as @code{$1} in @value{GDBN}.
+The results of evaluations in Guile and in GDB are counted separately,
+@code{$1} in Guile is not the same value as @code{$1} in @value{GDBN}.
 
 @value{GDBN} is not thread-safe.  If your Guile program uses multiple
 threads, you must be careful to only call @value{GDBN}-specific
-functions in the main @value{GDBN} thread.
+functions in the @value{GDBN} thread.
 
 Some care must be taken when writing Guile code to run in
 @value{GDBN}.  Two things are worth noting in particular:
@@ -211,7 +226,8 @@ and variables.
 
 The rest of this manual assumes the @code{gdb} module has been imported
 without any prefix.  See the Guile documentation for @code{use-modules}
-for more information.
+for more information
+(@pxref{Using Guile Modules,,, guile, GNU Guile Reference Manual}).
 
 Example:
 
@@ -228,7 +244,7 @@ int
 The @code{(gdb)} module provides these basic Guile functions.
 
 @c TODO: line length 
-@defun execute command @r{[}#:from-tty boolean@r{]}@r{[}#:to-string boolean@r{]}
+@deffn {Scheme Procedure} execute command @r{[}#:from-tty boolean@r{]}@r{[}#:to-string boolean@r{]}
 Evaluate @var{command}, a string, as a @value{GDBN} CLI command.
 If a @value{GDBN} exception happens while @var{command} runs, it is
 translated as described in
@@ -239,15 +255,16 @@ command as having originated from the user invoking it interactively.
 It must be a boolean value.  If omitted, it defaults to @code{#f}.
 
 By default, any output produced by @var{command} is sent to
-@value{GDBN}'s standard output.  If the @var{to-string} parameter is
+@value{GDBN}'s standard output (and to the log output if logging is
+turned on).  If the @var{to-string} parameter is
 @code{#t}, then output will be collected by @code{gdb.execute} and
 returned as a string.  The default is @code{#f}, in which case the
 return value is unspecified.  If @var{to-string} is @code{#t}, the
 @value{GDBN} virtual terminal will be temporarily set to unlimited width
 and height, and its pagination will be disabled; @pxref{Screen Size}.
-@end defun
+@end deffn
 
-@defun history-ref number
+@deffn {Scheme Procedure} history-ref number
 Return a value from @value{GDBN}'s value history (@pxref{Value
 History}).  @var{number} indicates which history element to return.
 If @var{number} is negative, then @value{GDBN} will take its absolute value
@@ -261,11 +278,13 @@ If no exception is raised, the return value is always an instance of
 @code{<gdb:value>} (@pxref{Values From Inferior In Guile}).
 
 @emph{Note:} @value{GDBN}'s value history is independent of Guile's.
-@code{$1} in @value{GDBN}'s value history is not @code{$1} from Guile's
-history, nor is the reverse true.
-@end defun
+@code{$1} in @value{GDBN}'s value history contains the result of evaluating
+an expression from @value{GDBN}'s command line and @code{$1} from Guile's
+history contains the result of evaluating an expression from Guile's
+command line.
+@end deffn
 
-@defun parse-and-eval expression
+@deffn {Scheme Procedure} parse-and-eval expression
 Parse @var{expression} as an expression in the current language,
 evaluate it, and return the result as a @code{<gdb:value>}.
 @var{expression} must be a string.
@@ -273,39 +292,149 @@ evaluate it, and return the result as a @code{<gdb:value>}.
 This function is useful when computing values.
 For example, it is the only way to get the value of a
 convenience variable (@pxref{Convenience Vars}) as a @code{<gdb:value>}.
-@end defun
+@end deffn
 
-@defun string->argv string
+@deffn {Scheme Procedure} string->argv string
 Convert a string to a list of strings split up according to
 @value{GDBN}'s argv parsing rules.
-@end defun
+@end deffn
 
 @node Guile Configuration
 @subsubsection Guile Configuration
+@cindex guile configuration
 
-@value{GDBN} provides these variables that specify various configuration
-parameters.  They are read-only.
-By convention global variables are named @code{*variable*}.
+@value{GDBN} provides these Scheme functions to access various configuration
+parameters.
 
-@defun data-directory
+@deffn {Scheme Procedure} data-directory
 Return a string containing @value{GDBN}'s data directory.
 This directory contains @value{GDBN}'s ancillary files, including
 the Guile modules provided by @value{GDBN}.
-@end defun
+@end deffn
 
-@defun gdb-version
+@deffn {Scheme Procedure} gdb-version
 Return a string containing the @value{GDBN} version.
-@end defun
+@end deffn
 
-@defun host-config
+@deffn {Scheme Procedure} host-config
 Return a string containing the host configuration.
 This is the string passed to @code{--host} when @value{GDBN} was configured.
-@end defun
+@end deffn
 
-@defun target-config
+@deffn {Scheme Procedure} target-config
 Return a string containing the target configuration.
 This is the string passed to @code{--target} when @value{GDBN} was configured.
-@end defun
+@end deffn
+
+@node GDB Smobs
+@subsubsection GDB Smobs
+@cindex gdb smobs
+
+@value{GDBN} uses Guile's @dfn{smob} (small object)
+data type for all @value{GDBN} objects
+(@pxref{Defining New Types (Smobs),,, guile, GNU Guile Reference Manual}).
+The smobs that @value{GDBN} provides are called @dfn{gmobs}.
+
+@deffn {Scheme Procedure} gsmob-kind gsmob
+Return the kind of the gsmob, e.g., @code{<gdb:breakpoint>},
+as a symbol.
+@end deffn
+
+Every @code{gsmob} provides a common set of functions for extending
+them in simple ways.  Each @code{gsmob} has a list of properties,
+initially empty.  These properties are akin to Guile's object properties,
+but are stored with the @code{gsmob}
+(@pxref{Object Properties,,, guile, GNU Guile Reference Manual}).
+Property names can be any @code{eq?}-able value, but it is recommended
+that they be symbols.
+
+@deffn {Scheme Procedure} set-gsmob-property! gsmob property-name value
+Set the value of property @code{property-name} to value @code{value}.
+The result is unspecified.
+@end deffn
+
+@deffn {Scheme Procedure} gsmob-property gsmob property-name
+Return the value of property @code{property-name}.
+If the property isn't present then @code{#f} is returned.
+@end deffn
+
+@deffn {Scheme Procedure} gsmob-has-property? gsmob property-name
+Return @code{#t} if @code{gsmob} has property @code{property-name}.
+Otherwise return @code{#f}.
+@end deffn
+
+@deffn {Scheme Procedure} gsmob-properties gsmob
+Return an unsorted list of names of properties.
+@end deffn
+
+@value{GDBN} defines the following Scheme smobs:
+
+@table @code
+@item <gdb:arch>
+@xref{Architectures In Guile}.
+
+@item <gdb:block>
+@xref{Blocks In Guile}.
+
+@item <gdb:block-symbols-iterator>
+@xref{Blocks In Guile}.
+
+@item <gdb:breakpoint>
+@xref{Breakpoints In Guile}.
+
+@item <gdb:exception>
+@xref{Guile Exception Handling}.
+
+@item <gdb:frame>
+@xref{Frames In Guile}.
+
+@item <gdb:iterator>
+@xref{Iterators In Guile}.
+
+@item <gdb:lazy-string>
+@xref{Lazy Strings In Guile}.
+
+@item <gdb:objfile>
+@xref{Objfiles In Guile}.
+
+@item <gdb:pretty-printer>
+@xref{Guile Pretty Printing API}.
+
+@item <gdb:pretty-printer-worker>
+@xref{Guile Pretty Printing API}.
+
+@item <gdb:symbol>
+@xref{Symbols In Guile}.
+
+@item <gdb:symtab>
+@xref{Symbol Tables In Guile}.
+
+@item <gdb:sal>
+@xref{Symbol Tables In Guile}.
+
+@item <gdb:type>
+@xref{Types In Guile}.
+
+@item <gdb:field>
+@xref{Types In Guile}.
+
+@item <gdb:value>
+@xref{Values From Inferior In Guile}.
+@end table
+
+The following gsmobs are managed internally so that the Scheme function
+@code{eq?} may be applied to them.
+
+@table @code
+@item <gdb:arch>
+@item <gdb:block>
+@item <gdb:breakpoint>
+@item <gdb:frame>
+@item <gdb:objfile>
+@item <gdb:symbol>
+@item <gdb:symtab>
+@item <gdb:type>
+@end table
 
 @node Guile Exception Handling
 @subsubsection Guile Exception Handling
@@ -344,7 +473,7 @@ In addition to an error message a full backtrace is printed.
 @smallexample
 (@value{GDBP}) set guile print-stack full
 (@value{GDBP}) guile (display foo)
-Backtrace:
+Guile Backtrace:
 In ice-9/boot-9.scm:
  157: 10 [catch #t #<catch-closure 2c76e20> ...]
 In unknown file:
@@ -384,7 +513,7 @@ prompt) is translated to a Guile @code{signal} exception with value
 
 @value{GDBN} Guile procedures can also throw these exceptions:
 
-@ftable @code
+@vtable @code
 @item gdb:error
 This exception is a catch-all for errors generated from within @value{GDBN}.
 
@@ -403,28 +532,30 @@ memory in the inferior.
 @item gdb:pp-type-error
 This exception is thrown when a Guile pretty-printer passes a bad object
 to @value{GDBN}.
-@end ftable
+@end vtable
 
 The following exception-related procedures are provided by the
 @code{(gdb)} module.
 
-@defun make-exception key args
+@deffn {Scheme Procedure} make-exception key args
 Return a @code{<gdb:exception>} object.
 @var{key} and @var{args} are the standard Guile parameters of an exception.
-See Guile documentation for more information.
-@end defun
+See the Guile documentation for more information
+(@pxref{Exceptions,,, guile, GNU Guile Reference Manual}).
+@end deffn
 
-@defun exception? object
+@deffn {Scheme Procedure} exception? object
 Return @code{#t} if @var{object} is a @code{<gdb:exception>} object.
-@end defun
+Otherwise return @code{#f}.
+@end deffn
 
-@defun exception-key exception
+@deffn {Scheme Procedure} exception-key exception
 Return the @var{args} field of a @code{<gdb:exception>} object.
-@end defun
+@end deffn
 
-@defun exception-args exception
+@deffn {Scheme Procedure} exception-args exception
 Return the @var{args} field of a @code{<gdb:exception>} object.
-@end defun
+@end deffn
 
 @node Values From Inferior In Guile
 @subsubsection Values From Inferior In Guile
@@ -438,8 +569,7 @@ for its internal bookkeeping of the inferior's values, and for
 fetching values when necessary.
 
 @value{GDBN} does not memoize @code{<gdb:value>} objects.
-Therefore @code{eq?} does not work as expected.
-However @code{equal?} does work.
+@code{make-value} always returns a fresh object.
 
 @smallexample
 (gdb) guile (eq? (make-value 1) (make-value 1))
@@ -473,50 +603,48 @@ be accessed using any special syntax, instead @code{value-field} must be used.
 The following value-related procedures are provided by the
 @code{(gdb)} module.
 
-@defun value? object
+@deffn {Scheme Procedure} value? object
 Return @code{#t} if @var{object} is a @code{<gdb:value>} object.
-@end defun
+Otherwise return @code{#f}.
+@end deffn
 
-@defun make-value value @r{[}#:type type@r{]}
-Many Scheme values can be converted directly to a @code{<gdb:value>} via
+@deffn {Scheme Procedure} make-value value @r{[}#:type type@r{]}
+Many Scheme values can be converted directly to a @code{<gdb:value>}
 with this procedure.  If @var{type} is specified, the result is a value
 of this type, and if @var{value} can't be represented with this type
 an exception is thrown.  Otherwise the type of the result is determined from
 @var{value} as described below.
 
-The following Scheme objects are accepted for @var{value}:
+@xref{Architectures In Guile}, for a list of the builtin
+types for an architecture.
+
+Here's how Scheme values are converted when @var{type} argument to
+@code{make-value} is not specified:
 
 @table @asis
 @item Scheme boolean
-A Scheme boolean is converted to @var{type} if provided, otherwise
-the boolean type for the current language.
+A Scheme boolean is converted the boolean type for the current language.
 
 @item Scheme integer
-A Scheme integer is converted to a value of type @var{type} if provided.
-
-If @var{type} is not provided,
-a Scheme integer is converted to the first of a C @code{int},
+A Scheme integer is converted to the first of a C @code{int},
 @code{unsigned int}, @code{long}, @code{unsigned long},
 @code{long long} or @code{unsigned long long} type
 for the current architecture that can represent the value.
-To force a particular type use
-@code{(make-value @var{value} #:type @var{type})}.
-@xref{Architectures In Guile}, for a list of the builtin
-types for an architecture.
 
 If the Scheme integer cannot be represented as a target integer
 an @code{out-of-range} exception is thrown.
 
 @item Scheme real
-A Scheme real is converted to a value of type @var{type} if provided.
-
-If @var{type} is not provided,
-a Scheme real is converted to the C @code{double} type for the
+A Scheme real is converted to the C @code{double} type for the
 current architecture.
 
 @item Scheme string
-A Scheme string is converted to a target string, using the current
-target encoding.
+A Scheme string is converted to a string in the current target
+language using the current target encoding.
+Characters that cannot be represented in the current target encoding
+are replaced with the corresponding escape sequence.  This is Guile's
+@code{SCM_FAILED_CONVERSION_ESCAPE_SEQUENCE} conversion strategy
+(@pxref{Strings,,, guile, GNU Guile Reference Manual}).
 
 Passing @var{type} is not supported in this case,
 if it is provided a @code{wrong-type-arg} exception is thrown.
@@ -537,26 +665,27 @@ and the result is essentially created by using @code{memcpy}.
 If @var{value} is a Scheme bytevector and @var{type} is not provided,
 the result is an array of type @code{uint8} of the same length.
 @end table
-@end defun
+@end deffn
 
 @cindex optimized out value in guile
-@defun value-optimized-out? value
+@deffn {Scheme Procedure} value-optimized-out? value
 Return @code{#t} if the compiler optimized out @var{value},
 thus it is not available for fetching from the inferior.
-@end defun
+Otherwise return @code{#f}.
+@end deffn
 
-@defun value-address value
+@deffn {Scheme Procedure} value-address value
 If @var{value} is addressable, returns a
 @code{<gdb:value>} object representing the address.
 Otherwise, @code{#f} is returned.
-@end defun
+@end deffn
 
-@defun value-type value
+@deffn {Scheme Procedure} value-type value
 Return the type of @var{value} as a @code{<gdb:type>} object
 (@pxref{Types In Guile}).
-@end defun
+@end deffn
 
-@defun value-dynamic-type value
+@deffn {Scheme Procedure} value-dynamic-type value
 Return the dynamic type of @var{value}.  This uses C@t{++} run-time
 type information (@acronym{RTTI}) to determine the dynamic type of the
 value.  If the value is of class type, it will return the class in
@@ -570,26 +699,26 @@ Note that this feature will only work when debugging a C@t{++} program
 that includes @acronym{RTTI} for the object in question.  Otherwise,
 it will just return the static type of the value as in @kbd{ptype foo}.
 @xref{Symbols, ptype}.
-@end defun
+@end deffn
 
-@defun value-cast value type
+@deffn {Scheme Procedure} value-cast value type
 Return a new instance of @code{<gdb:value>} that is the result of
 casting @var{value} to the type described by @var{type}, which must
 be a @code{<gdb:type>} object.  If the cast cannot be performed for some
 reason, this method throws an exception.
-@end defun
+@end deffn
 
-@defun value-dynamic-cast value type
+@deffn {Scheme Procedure} value-dynamic-cast value type
 Like @code{value-cast}, but works as if the C@t{++} @code{dynamic_cast}
 operator were used.  Consult a C@t{++} reference for details.
-@end defun
+@end deffn
 
-@defun value-reinterpret-cast value type
+@deffn {Scheme Procedure} value-reinterpret-cast value type
 Like @code{value-cast}, but works as if the C@t{++} @code{reinterpret_cast}
 operator were used.  Consult a C@t{++} reference for details.
-@end defun
+@end deffn
 
-@defun value-dereference value
+@deffn {Scheme Procedure} value-dereference value
 For pointer data types, this method returns a new @code{<gdb:value>} object
 whose contents is the object pointed to by @var{value}.  For example, if
 @code{foo} is a C pointer to an @code{int}, declared in your C program as
@@ -650,9 +779,9 @@ the results obtained need not be identical (as we have seen in the above
 example).  The results are however identical when applied on
 @code{<gdb:value>} objects corresponding to pointers (@code{<gdb:value>}
 objects with type code @code{TYPE_CODE_PTR}) in a C/C@t{++} program.
-@end defun
+@end deffn
 
-@defun value-referenced-value value
+@deffn {Scheme Procedure} value-referenced-value value
 For pointer or reference data types, this method returns a new
 @code{<gdb:value>} object corresponding to the value referenced by the
 pointer/reference value.  For pointer data types,
@@ -681,60 +810,61 @@ identical to that corresponding to @code{val}.
 
 The @code{<gdb:value>} object @code{scm-val} is identical to that
 corresponding to @code{val}.
-@end defun
+@end deffn
 
-@defun value-field value field-name
+@deffn {Scheme Procedure} value-field value field-name
 Return field @var{field-name} from @code{<gdb:value>} object @var{value}.
-@end defun
+@end deffn
 
-@defun value-subscript value index
+@deffn {Scheme Procedure} value-subscript value index
 Return the value of array @var{value} at index @var{index}.
 @var{value} must be a subscriptable @code{<gdb:value>} object.
-@end defun
+@end deffn
 
-@defun value-call value arg-list
+@deffn {Scheme Procedure} value-call value arg-list
 Perform an inferior function call, taking @var{value} as a pointer
 to the function to call.
 Each element of list @var{arg-list} must be a <gdb:value> object or an object
-that can be converted to one.
+that can be converted to a value..
 The result is the value returned by the function.
-@end defun
+@end deffn
 
-@defun value->bool value
+@deffn {Scheme Procedure} value->bool value
 Return the Scheme boolean representing @code{<gdb:value>} @var{value}.
 The value must be ``integer like''.  Pointers are ok.
-@end defun
+@end deffn
 
-@defun value->integer
+@deffn {Scheme Procedure} value->integer
 Return the Scheme integer representing @code{<gdb:value>} @var{value}.
 The value must be ``integer like''.  Pointers are ok.
-@end defun
+@end deffn
 
-@defun value->real
+@deffn {Scheme Procedure} value->real
 Return the Scheme real number representing @code{<gdb:value>} @var{value}.
 The value must be a number.
-@end defun
+@end deffn
 
-@defun value->bytevector
+@deffn {Scheme Procedure} value->bytevector
 Return a Scheme bytevector with the raw contents of @code{<gdb:value>}
 @var{value}.  No transformation, endian or otherwise, is performed.
-@end defun
+@end deffn
 
 @c TODO: line length
-@defun value->string value @r{[}#:encoding encoding@r{]} @r{[}#:errors errors@r{]} @r{[}#:length length@r{]}
+@deffn {Scheme Procedure} value->string value @r{[}#:encoding encoding@r{]} @r{[}#:errors errors@r{]} @r{[}#:length length@r{]}
 If @var{value>} represents a string, then this method
 converts the contents to a Guile string.  Otherwise, this method will
 throw an exception.
 
-Strings are recognized in a language-specific way; whether a given
-@code{<gdb:value>} represents a string is determined by the current
-language.
+Values are interpreted as strings according to the rules of the
+current language.  If the optional length argument is given, the
+string will be converted to that length, and will include any embedded
+zeroes that the string may contain.  Otherwise, for languages
+where the string is zero-terminated, the entire string will be
+converted.
 
-For C-like languages, a value is a string if it is a pointer to or an
-array of characters or ints.  The string is assumed to be terminated
-by a zero of the appropriate width.  However if the optional length
-argument is given, the string will be converted to that given length,
-ignoring any embedded zeros that the string may contain.
+For example, in C-like languages, a value is a string if it is a pointer
+to or an array of characters or ints of type @code{wchar_t}, @code{char16_t},
+or @code{char32_t}.
 
 If the optional @var{encoding} argument is given, it must be a string
 naming the encoding of the string in the @code{<gdb:value>}, such as
@@ -746,18 +876,23 @@ to convert the string.  If @var{encoding} is not given, or if
 (@pxref{Character Sets}) will be used, or a language-specific encoding
 will be used, if the current language is able to supply one.
 
-The optional @var{errors} argument is either @code{"strict"}
-or @code{"replace"}.  A value of @code{"strict"} corresponds to
-Guile's @code{SCM_FAILED_CONVERSION_ERROR} and a value of @code{"replace"}
-corresponds to Guile's @code{SCM_FAILED_CONVERSION_QUESTION_MARK}.
+The optional @var{errors} argument is one of @code{#f}, @code{error} or
+@code{substitute}.  @code{error} and @code{substitute} must be symbols.
+If @var{errors} is not specified, or if its value is @code{#f}, then the
+default conversion strategy is used, which is set with the Scheme function
+@code{set-port-conversion-strategy!}.
+If the value is @code{'error} then an exception is thrown if there is any
+conversion error.  If the value is @code{'substitute} then any conversion
+error is replaced with question marks.
+@xref{Strings,,, guile, GNU Guile Reference Manual}.
 
 If the optional @var{length} argument is given, the string will be
 fetched and converted to the given length.
 The length must be a Scheme integer and not a @code{<gdb:value>} integer.
-@end defun
+@end deffn
 
 @c TODO: line length
-@defun value->lazy-string value @r{[}#:encoding encoding@r{]} @r{[}#:length length@r{]})
+@deffn {Scheme Procedure} value->lazy-string value @r{[}#:encoding encoding@r{]} @r{[}#:length length@r{]})
 If this @code{<gdb:value>} represents a string, then this method
 converts @var{value} to a @code{<gdb:lazy-string} (@pxref{Lazy Strings
 In Guile}).  Otherwise, this method will throw an exception.
@@ -780,11 +915,12 @@ fetched and encoded to the length of characters specified.  If
 the @var{length} argument is not provided, the string will be fetched
 and encoded until a null of appropriate width is found.
 The length must be a Scheme integer and not a @code{<gdb:value>} integer.
-@end defun
+@end deffn
 
-@defun value-lazy? value
+@deffn {Scheme Procedure} value-lazy? value
 Return @code{#t} if @var{value} has not yet been fetched
 from the inferior.  
+Otherwise return @code{#f}.
 @value{GDBN} does not fetch values until necessary, for efficiency.  
 For example:
 
@@ -795,15 +931,15 @@ For example:
 The value of @code{somevar} is not fetched at this time.  It will be 
 fetched when the value is needed, or when the @code{fetch-lazy}
 procedure is invoked.  
-@end defun
+@end deffn
 
-@defun make-lazy-value type address
+@deffn {Scheme Procedure} make-lazy-value type address
 Return a @code{<gdb:value>} that will be lazily fetched from the target.
 @var{type} is an object of type @code{<gdb:type>} and @var{address} is
 a Scheme integer of the address of the object in target memory.
-@end defun
+@end deffn
 
-@defun value-fetch-lazy! value
+@deffn {Scheme Procedure} value-fetch-lazy! value
 If @var{value} is a lazy value (@code{(value-lazy? value)} is @code{#t}),
 then the value is fetched from the inferior.
 Any errors that occur in the process will produce a Guile exception.
@@ -811,12 +947,12 @@ Any errors that occur in the process will produce a Guile exception.
 If @var{value} is not a lazy value, this method has no effect.
 
 The result of this function is unspecified.
-@end defun
+@end deffn
 
-@defun value-print value
+@deffn {Scheme Procedure} value-print value
 Return the string representation (print form) of @code{<gdb:value>}
 @var{value}.
-@end defun
+@end deffn
 
 @node Arithmetic In Guile
 @subsubsection Arithmetic In Guile
@@ -832,77 +968,77 @@ Wherever a function takes an integer or pointer as an operand,
 @value{GDBN} will convert appropriate Scheme values to perform
 the operation.
 
-@defun value-add a b
-@end defun
+@deffn {Scheme Procedure} value-add a b
+@end deffn
 
-@defun value-sub a b
-@end defun
+@deffn {Scheme Procedure} value-sub a b
+@end deffn
 
-@defun value-mul a b
-@end defun
+@deffn {Scheme Procedure} value-mul a b
+@end deffn
 
-@defun value-div a b
-@end defun
+@deffn {Scheme Procedure} value-div a b
+@end deffn
 
-@defun value-rem a b
-@end defun
+@deffn {Scheme Procedure} value-rem a b
+@end deffn
 
-@defun value-mod a b
-@end defun
+@deffn {Scheme Procedure} value-mod a b
+@end deffn
 
-@defun value-pow a b
-@end defun
+@deffn {Scheme Procedure} value-pow a b
+@end deffn
 
-@defun value-not a
-@end defun
+@deffn {Scheme Procedure} value-not a
+@end deffn
 
-@defun value-neg a
-@end defun
+@deffn {Scheme Procedure} value-neg a
+@end deffn
 
-@defun value-pos a
-@end defun
+@deffn {Scheme Procedure} value-pos a
+@end deffn
 
-@defun value-abs a
-@end defun
+@deffn {Scheme Procedure} value-abs a
+@end deffn
 
-@defun value-lsh a b
-@end defun
+@deffn {Scheme Procedure} value-lsh a b
+@end deffn
 
-@defun value-rsh a b
-@end defun
+@deffn {Scheme Procedure} value-rsh a b
+@end deffn
 
-@defun value-max a b
-@end defun
+@deffn {Scheme Procedure} value-min a b
+@end deffn
 
-@defun value-max a b
-@end defun
+@deffn {Scheme Procedure} value-max a b
+@end deffn
 
-@defun value-lognot a
-@end defun
+@deffn {Scheme Procedure} value-lognot a
+@end deffn
 
-@defun value-logand a b
-@end defun
+@deffn {Scheme Procedure} value-logand a b
+@end deffn
 
-@defun value-logior a b
-@end defun
+@deffn {Scheme Procedure} value-logior a b
+@end deffn
 
-@defun value-logxor a b
-@end defun
+@deffn {Scheme Procedure} value-logxor a b
+@end deffn
 
-@defun value=? a b
-@end defun
+@deffn {Scheme Procedure} value=? a b
+@end deffn
 
-@defun value<? a b
-@end defun
+@deffn {Scheme Procedure} value<? a b
+@end deffn
 
-@defun value<=? a b
-@end defun
+@deffn {Scheme Procedure} value<=? a b
+@end deffn
 
-@defun value>? a b
-@end defun
+@deffn {Scheme Procedure} value>? a b
+@end deffn
 
-@defun value>=? a b
-@end defun
+@deffn {Scheme Procedure} value>=? a b
+@end deffn
 
 Scheme does not provide a @code{not-equal} function,
 and thus Guile support in @value{GDBN} does not either.
@@ -919,11 +1055,12 @@ and thus Guile support in @value{GDBN} does not either.
 The following type-related procedures are provided by the
 @code{(gdb)} module.
 
-@defun type? object
+@deffn {Scheme Procedure} type? object
 Return @code{#t} if @var{object} is an object of type @code{<gdb:type>}.
-@end defun
+Otherwise return @code{#f}.
+@end deffn
 
-@defun lookup-type name @r{[}#:block block@r{]}
+@deffn {Scheme Procedure} lookup-type name @r{[}#:block block@r{]}
 This function looks up a type by name.  @var{name} is the name of the
 type to look up.  It must be a string.
 
@@ -933,41 +1070,41 @@ Otherwise, it is searched for globally.
 
 Ordinarily, this function will return an instance of @code{<gdb:type>}.
 If the named type cannot be found, it will throw an exception.
-@end defun
+@end deffn
 
-@defun type-code type
+@deffn {Scheme Procedure} type-code type
 Return the type code for this type.  The type code will be one of the
 @code{TYPE_CODE_} constants defined below.
-@end defun
+@end deffn
 
-@defun type-tag type
+@deffn {Scheme Procedure} type-tag type
 Return the tag name for this type.  The tag name is the name after
 @code{struct}, @code{union}, or @code{enum} in C and C@t{++}; not all
 languages have this concept.  If this type has no tag name, then
 @code{#f} is returned.
-@end defun
+@end deffn
 
-@defun type-sizeof type
+@deffn {Scheme Procedure} type-sizeof type
 Return the size of this type, in target @code{char} units.  Usually, a
 target's @code{char} type will be an 8-bit byte.  However, on some
 unusual platforms, this type may have a different size.
-@end defun
+@end deffn
 
-@defun type-strip-typedefs type
+@deffn {Scheme Procedure} type-strip-typedefs type
 Return a new @code{<gdb:type>} that represents the real type of @var{type},
 after removing all layers of typedefs.
-@end defun
+@end deffn
 
-@defun type-array type @var{n1} @r{[}@var{n2}@r{]}
+@deffn {Scheme Procedure} type-array type n1 @r{[}n2@r{]}
 Return a new @code{<gdb:type>} object which represents an array of this
 type.  If one argument is given, it is the inclusive upper bound of
 the array; in this case the lower bound is zero.  If two arguments are
 given, the first argument is the lower bound of the array, and the
 second argument is the upper bound of the array.  An array's length
 must not be negative, but the bounds can be.
-@end defun
+@end deffn
 
-@defun type-vector type @var{n1} @r{[}@var{n2}@r{]}
+@deffn {Scheme Procedure} type-vector type n1 @r{[}n2@r{]}
 Return a new @code{<gdb:type>} object which represents a vector of this
 type.  If one argument is given, it is the inclusive upper bound of
 the vector; in this case the lower bound is zero.  If two arguments are
@@ -978,24 +1115,24 @@ must not be negative, but the bounds can be.
 The difference between an @code{array} and a @code{vector} is that
 arrays behave like in C: when used in expressions they decay to a pointer
 to the first element whereas vectors are treated as first class values.
-@end defun
+@end deffn
 
-@defun type-pointer type
+@deffn {Scheme Procedure} type-pointer type
 Return a new @code{<gdb:type>} object which represents a pointer to
 @var{type}.
-@end defun
+@end deffn
 
-@defun type-range type
+@deffn {Scheme Procedure} type-range type
 Return a list of two elements: the low bound and high bound of @var{type}.
 If @var{type} does not have a range, an exception is thrown.
-@end defun
+@end deffn
 
-@defun type-reference type
+@deffn {Scheme Procedure} type-reference type
 Return a new @code{<gdb:type>} object which represents a reference to
 @var{type}.
-@end defun
+@end deffn
 
-@defun type-target type
+@deffn {Scheme Procedure} type-target type
 Return a new @code{<gdb:type>} object which represents the target type
 of @var{type}.
 
@@ -1008,33 +1145,33 @@ target type is the aliased type.
 
 If the type does not have a target, this method will throw an
 exception.
-@end defun
+@end deffn
 
-@defun type-const type
+@deffn {Scheme Procedure} type-const type
 Return a new @code{<gdb:type>} object which represents a
 @code{const}-qualified variant of @var{type}.
-@end defun
+@end deffn
 
-@defun type-volatile type
+@deffn {Scheme Procedure} type-volatile type
 Return a new @code{<gdb:type>} object which represents a
 @code{volatile}-qualified variant of @var{type}.
-@end defun
+@end deffn
 
-@defun type-unqualified type
+@deffn {Scheme Procedure} type-unqualified type
 Return a new @code{<gdb:type>} object which represents an unqualified
 variant of @var{type}.  That is, the result is neither @code{const} nor
 @code{volatile}.
-@end defun
+@end deffn
 
-@defun type-name type
+@deffn {Scheme Procedure} type-name type
 Return the name of @code{<gdb:type>} @var{type}.
-@end defun
+@end deffn
 
-@defun type-num-fields
+@deffn {Scheme Procedure} type-num-fields
 Return the number of fields of @code{<gdb:type>} @var{type}.
-@end defun
+@end deffn
 
-@defun type-fields type
+@deffn {Scheme Procedure} type-fields type
 Return the fields of @var{type} as a list.
 For structure and union types, @code{fields} has the usual meaning.
 Range types have two fields, the minimum and maximum values.  Enum types
@@ -1042,18 +1179,18 @@ have one field per enum constant.  Function and method types have one
 field per parameter.  The base types of C@t{++} classes are also
 represented as fields.  If the type has no fields, or does not fit
 into one of these categories, an empty list will be returned.
-@xref{Fields of a Type in Guile}.
-@end defun
+@xref{Fields of a type in Guile}.
+@end deffn
 
-@defun make-field-iterator type
+@deffn {Scheme Procedure} make-field-iterator type
 Return the fields of @var{type} as a <gdb:iterator> object.
 @xref{Iterators In Guile}.
-@end defun
+@end deffn
 
-@defun type-field type field-name
+@deffn {Scheme Procedure} type-field type field-name
 Return field named @var{field-name} in @var{type}.
 The result is an object of type @code{<gdb:field>}.
-@xref{Fields of a Type in Guile}.
+@xref{Fields of a type in Guile}.
 If the type does not have fields, or @var{field-name} is not a field
 of @var{type}, an exception is thrown.
 
@@ -1065,174 +1202,153 @@ a structure type, you can access its @code{foo} field with:
 @end smallexample
 
 @code{bar} will be a @code{<gdb:field>} object.
-@end defun
+@end deffn
 
-@defun type-has-field? type name
+@deffn {Scheme Procedure} type-has-field? type name
 Return @code{#t} if @code{<gdb:type>} @var{type} has field named @var{name}.
-@end defun
+Otherwise return @code{#f}.
+@end deffn
 
 Each type has a code, which indicates what category this type falls
 into.  The available type categories are represented by constants
 defined in the @code{(gdb)} module:
 
-@table @code
-@findex TYPE_CODE_PTR
+@vtable @code
 @item TYPE_CODE_PTR
 The type is a pointer.
 
-@findex TYPE_CODE_ARRAY
 @item TYPE_CODE_ARRAY
 The type is an array.
 
-@findex TYPE_CODE_STRUCT
 @item TYPE_CODE_STRUCT
 The type is a structure.
 
-@findex TYPE_CODE_UNION
 @item TYPE_CODE_UNION
 The type is a union.
 
-@findex TYPE_CODE_ENUM
 @item TYPE_CODE_ENUM
 The type is an enum.
 
-@findex TYPE_CODE_FLAGS
 @item TYPE_CODE_FLAGS
 A bit flags type, used for things such as status registers.
 
-@findex TYPE_CODE_FUNC
 @item TYPE_CODE_FUNC
 The type is a function.
 
-@findex TYPE_CODE_INT
 @item TYPE_CODE_INT
 The type is an integer type.
 
-@findex TYPE_CODE_FLT
 @item TYPE_CODE_FLT
 A floating point type.
 
-@findex TYPE_CODE_VOID
 @item TYPE_CODE_VOID
 The special type @code{void}.
 
-@findex TYPE_CODE_SET
 @item TYPE_CODE_SET
 A Pascal set type.
 
-@findex TYPE_CODE_RANGE
 @item TYPE_CODE_RANGE
 A range type, that is, an integer type with bounds.
 
-@findex TYPE_CODE_STRING
 @item TYPE_CODE_STRING
 A string type.  Note that this is only used for certain languages with
 language-defined string types; C strings are not represented this way.
 
-@findex TYPE_CODE_BITSTRING
 @item TYPE_CODE_BITSTRING
 A string of bits.  It is deprecated.
 
-@findex TYPE_CODE_ERROR
 @item TYPE_CODE_ERROR
 An unknown or erroneous type.
 
-@findex TYPE_CODE_METHOD
 @item TYPE_CODE_METHOD
 A method type, as found in C@t{++} or Java.
 
-@findex TYPE_CODE_METHODPTR
 @item TYPE_CODE_METHODPTR
 A pointer-to-member-function.
 
-@findex TYPE_CODE_MEMBERPTR
 @item TYPE_CODE_MEMBERPTR
 A pointer-to-member.
 
-@findex TYPE_CODE_REF
 @item TYPE_CODE_REF
 A reference type.
 
-@findex TYPE_CODE_CHAR
 @item TYPE_CODE_CHAR
 A character type.
 
-@findex TYPE_CODE_BOOL
 @item TYPE_CODE_BOOL
 A boolean type.
 
-@findex TYPE_CODE_COMPLEX
 @item TYPE_CODE_COMPLEX
 A complex float type.
 
-@findex TYPE_CODE_TYPEDEF
 @item TYPE_CODE_TYPEDEF
 A typedef to some other type.
 
-@findex TYPE_CODE_NAMESPACE
 @item TYPE_CODE_NAMESPACE
 A C@t{++} namespace.
 
-@findex TYPE_CODE_DECFLOAT
 @item TYPE_CODE_DECFLOAT
 A decimal floating point type.
 
-@findex TYPE_CODE_INTERNAL_FUNCTION
 @item TYPE_CODE_INTERNAL_FUNCTION
 A function internal to @value{GDBN}.  This is the type used to represent
-convenience functions.
-@end table
+convenience functions (@pxref{Convenience Funs}).
+@end vtable
 
 Further support for types is provided in the @code{(gdb types)}
 Guile module (@pxref{Guile Types Module}).
 
-@anchor{Fields of a Type in Guile}
+@anchor{Fields of a type in Guile}
 Each field is represented as an object of type @code{<gdb:field>}.
 
 The following field-related procedures are provided by the
 @code{(gdb)} module:
 
-@defun field? object
+@deffn {Scheme Procedure} field? object
 Return @code{#t} if @var{object} is an object of type @code{<gdb:field>}.
-@end defun
+Otherwise return @code{#f}.
+@end deffn
 
-@defun field-name field
+@deffn {Scheme Procedure} field-name field
 Return the name of the field, or @code{#f} for anonymous fields.
-@end defun
+@end deffn
 
-@defun field-type field
+@deffn {Scheme Procedure} field-type field
 Return the type of the field.  This is usually an instance of
 @code{<gdb:type>}, but it can be @code{#f} in some situations.
-@end defun
+@end deffn
 
-@defun field-enumval field
+@deffn {Scheme Procedure} field-enumval field
 Return the enum value represented by @code{<gdb:field>} @var{field}.
-@end defun
+@end deffn
 
-@defun field-bitpos field
+@deffn {Scheme Procedure} field-bitpos field
 Return the bit position of @code{<gdb:field>} @var{field}.
 This attribute is not available for @code{static} fields (as in
 C@t{++} or Java).
-@end defun
+@end deffn
 
-@defun field-bitsize field
+@deffn {Scheme Procedure} field-bitsize field
 If the field is packed, or is a bitfield, return the size of
 @code{<gdb:field>} @var{field} in bits.  Otherwise, zero is returned;
 in which case the field's size is given by its type.
-@end defun
+@end deffn
 
-@defun field-artificial? field
+@deffn {Scheme Procedure} field-artificial? field
 Return @code{#t} if the field is artificial, usually meaning that
 it was provided by the compiler and not the user.
-@end defun
+Otherwise return @code{#f}.
+@end deffn
 
-@defun field-base-class? field
+@deffn {Scheme Procedure} field-base-class? field
 Return @code{#t} if the field represents a base class of a C@t{++}
 structure.
-@end defun
+Otherwise return @code{#f}.
+@end deffn
 
 @node Guile Pretty Printing API
 @subsubsection Guile Pretty Printing API
+@cindex guile pretty printing api
 
 An example output is provided (@pxref{Pretty Printing}).
 
@@ -1242,7 +1358,7 @@ Pretty-printer objects are created with @code{make-pretty-printer}.
 The following pretty-printer-related procedures are provided by the
 @code{(gdb)} module:
 
-@defun make-pretty-printer name lookup-function
+@deffn {Scheme Procedure} make-pretty-printer name lookup-function
 Return a @code{<gdb:pretty-printer>} object named @var{name}.
 
 @var{lookup-function} is a function of one parameter: the value to
@@ -1250,22 +1366,24 @@ be printed.  If the value is handled by this pretty-printer, then
 @var{lookup-function} returns an object of type
 <gdb:pretty-printer-worker> to perform the actual pretty-printing.
 Otherwise @var{lookup-function} returns @code{#f}.
-@end defun
+@end deffn
 
-@defun pretty-printer? object
+@deffn {Scheme Procedure} pretty-printer? object
 Return @code{#t} if @var{object} is a @code{<gdb:pretty-printer>} object.
-@end defun
+Otherwise return @code{#f}.
+@end deffn
 
-@defun pretty-printer-enabled? pretty-printer
+@deffn {Scheme Procedure} pretty-printer-enabled? pretty-printer
 Return @code{#t} if @var{pretty-printer} is enabled.
-@end defun
+Otherwise return @code{#f}.
+@end deffn
 
-@defun set-pretty-printer-enabled! pretty-printer flag
+@deffn {Scheme Procedure} set-pretty-printer-enabled! pretty-printer flag
 Set the enabled flag of @var{pretty-printer} to @var{flag}.
 The value returned in unspecified.
-@end defun
+@end deffn
 
-@defun make-pretty-printer-worker display-hint to-string children
+@deffn {Scheme Procedure} make-pretty-printer-worker display-hint to-string children
 Return an object of type @code{<gdb:pretty-printer-worker>}.
 
 This function takes three parameters:
@@ -1346,19 +1464,20 @@ object which is convertible to a @value{GDBN} value.
 If @var{children} is @code{#f}, @value{GDBN} will act
 as though the value has no children.
 @end table
-@end defun
+@end deffn
 
 @value{GDBN} provides a function which can be used to look up the
 default pretty-printer for a @code{<gdb:value>}:
 
-@defun default-visualizer value
+@deffn {Scheme Procedure} default-visualizer value
 This function takes a @code{<gdb:value>} object as an argument.  If a
 pretty-printer for this value exists, then it is returned.  If no such
 printer exists, then this returns @code{#f}.
-@end defun
+@end deffn
 
 @node Selecting Guile Pretty-Printers
 @subsubsection Selecting Guile Pretty-Printers
+@cindex selecting guile pretty-printers
 
 The Guile list @code{*pretty-printers*} contains a set of
 @code{<gdb:pretty-printer>} registered objects.
@@ -1578,44 +1697,45 @@ Each objfile is represented as an object of type @code{<gdb:objfile>}.
 The following objfile-related procedures are provided by the
 @code{(gdb)} module:
 
-@defun objfile? object
+@deffn {Scheme Procedure} objfile? object
 Return @code{#t} if @var{object} is a @code{<gdb:objfile>} object.
-@end defun
+Otherwise return @code{#f}.
+@end deffn
 
-@defun objfile-valid? objfile
+@deffn {Scheme Procedure} objfile-valid? objfile
 Return @code{#t} if @var{objfile} is valid, @code{#f} if not.
 A @code{<gdb:objfile>} object can become invalid
 if the object file it refers to is not loaded in @value{GDBN} any
 longer.  All other @code{<gdb:objfile>} procedures will throw an exception
 if it is invalid at the time the procedure is called.
-@end defun
+@end deffn
 
-@defun objfile-filename objfile
+@deffn {Scheme Procedure} objfile-filename objfile
 Return the file name of @var{objfile} as a string.
-@end defun
+@end deffn
 
-@defun objfile-pretty-printers objfile
+@deffn {Scheme Procedure} objfile-pretty-printers objfile
 Return the list of registered @code{<gdb:pretty-printer>} objects for
 @var{objfile}.  @xref{Guile Pretty Printing API}, for more information.
-@end defun
+@end deffn
 
-@defun set-objfile-pretty-printers! objfile printer-list
+@deffn {Scheme Procedure} set-objfile-pretty-printers! objfile printer-list
 Set the list of registered @code{<gdb:pretty-printer>} objects for
 @var{objfile} to @var{printer-list}.
 @var{printer-list} must be a list of @code{<gdb:pretty-printer>} objects.
 @xref{Guile Pretty Printing API}, for more information.
-@end defun
+@end deffn
 
-@defun current-objfile
+@deffn {Scheme Procedure} current-objfile
 When auto-loading a Guile script (@pxref{Guile Auto-loading}), @value{GDBN}
 sets the ``current objfile'' to the corresponding objfile.  This
 function returns the current objfile.  If there is no current objfile,
 this function returns @code{#f}.
-@end defun
+@end deffn
 
-@defun objfiles
+@deffn {Scheme Procedure} objfiles
 Return a list of all the objfiles in the current program space.
-@end defun
+@end deffn
 
 @node Frames In Guile
 @subsubsection Accessing inferior stack frames from Guile.
@@ -1639,28 +1759,29 @@ Two @code{<gdb:frame>} objects can be compared for equality with the
 The following frame-related procedures are provided by the
 @code{(gdb)} module:
 
-@defun frame? object
+@deffn {Scheme Procedure} frame? object
 Return @code{#t} if @var{object} is a @code{<gdb:frame>} object.
-@end defun
+Otherwise return @code{#f}.
+@end deffn
 
-@defun frame-valid? frame
+@deffn {Scheme Procedure} frame-valid? frame
 Returns @code{#t} if @var{frame} is valid, @code{#f} if not.
 A frame object can become invalid if the frame it refers to doesn't
 exist anymore in the inferior.  All @code{<gdb:frame>} procedures will throw
 an exception if the frame is invalid at the time the procedure is called.
-@end defun
+@end deffn
 
-@defun frame-name frame
+@deffn {Scheme Procedure} frame-name frame
 Return the function name of @var{frame}, or @code{#f} if it can't be
 obtained.
-@end defun
+@end deffn
 
-@defun frame-arch frame
+@deffn {Scheme Procedure} frame-arch frame
 Return the @code{<gdb:architecture>} object corresponding to @var{frame}'s
 architecture.  @xref{Architectures In Guile}.
-@end defun
+@end deffn
 
-@defun frame-type frame
+@deffn {Scheme Procedure} frame-type frame
 Return the type of @var{frame}.  The value can be one of:
 
 @table @code
@@ -1689,9 +1810,9 @@ A fake stack frame representing a cross-architecture call.
 This is like @code{NORMAL_FRAME}, but it is only used for the
 newest frame.
 @end table
-@end defun
+@end deffn
 
-@defun frame-unwind-stop-reason frame
+@deffn {Scheme Procedure} frame-unwind-stop-reason frame
 Return an integer representing the reason why it's not possible to find
 more frames toward the outermost frame.  Use
 @code{unwind-stop-reason-string} to convert the value returned by this
@@ -1741,63 +1862,63 @@ versions.  Using it, you could write:
     (format #t "An error occured: ~s\n" reason-str))
 @end smallexample
 @end table
-@end defun
+@end deffn
 
-@defun frame-pc frame
+@deffn {Scheme Procedure} frame-pc frame
 Return the frame's resume address.
-@end defun
+@end deffn
 
-@defun frame-block frame
+@deffn {Scheme Procedure} frame-block frame
 Return the frame's code block as a @code{<gdb:block>} object.
 @xref{Blocks In Guile}.
-@end defun
+@end deffn
 
-@defun frame-function frame
+@deffn {Scheme Procedure} frame-function frame
 Return the symbol for the function corresponding to this frame
 as a @code{<gdb:symbol>} object, or @code{#f} if there isn't one.
 @xref{Symbols In Guile}.
-@end defun
+@end deffn
 
-@defun frame-older frame
+@deffn {Scheme Procedure} frame-older frame
 Return the frame that called @var{frame}.
-@end defun
+@end deffn
 
-@defun frame-newer frame
+@deffn {Scheme Procedure} frame-newer frame
 Return the frame called by @var{frame}.
-@end defun
+@end deffn
 
-@defun frame-sal frame
+@deffn {Scheme Procedure} frame-sal frame
 Return the frame's @code{<gdb:sal>} (symtab and line) object.
 @xref{Symbol Tables In Guile}.
-@end defun
+@end deffn
 
-@defun frame-read-var variable @r{[}#:block block@r{]}
+@deffn {Scheme Procedure} frame-read-var variable @r{[}#:block block@r{]}
 Return the value of @var{variable} in this frame.  If the optional
 argument @var{block} is provided, search for the variable from that
 block; otherwise start at the frame's current block (which is
 determined by the frame's current program counter).  @var{variable}
 must be a string or a @code{<gdb:symbol>} object.  @var{block} must be a
 @code{<gdb:block>} object.
-@end defun
+@end deffn
 
-@defun frame-select frame
+@deffn {Scheme Procedure} frame-select frame
 Set @var{frame} to be the selected frame.  @xref{Stack, ,Examining the
 Stack}.
-@end defun
+@end deffn
 
-@defun selected-frame
+@deffn {Scheme Procedure} selected-frame
 Return the selected frame object.  @xref{Selection,,Selecting a Frame}.
-@end defun
+@end deffn
 
-@defun newest-frame
+@deffn {Scheme Procedure} newest-frame
 Return the newest frame object for the selected thread.
-@end defun
+@end deffn
 
-@defun unwind-stop-reason-string reason
+@deffn {Scheme Procedure} unwind-stop-reason-string reason
 Return a string explaining the reason why @value{GDBN} stopped unwinding
 frames, as expressed by the given @var{reason} code (an integer, see the
 @code{frame-unwind-stop-reason} procedure above in this section).
-@end defun
+@end deffn
 
 @node Blocks In Guile
 @subsubsection Accessing blocks from Guile.
@@ -1859,28 +1980,29 @@ int function (int argument)
 The following block-related procedures are provided by the
 @code{(gdb)} module:
 
-@defun block? object
+@deffn {Scheme Procedure} block? object
 Return @code{#t} if @var{object} is a @code{<gdb:block>} object.
-@end defun
+Otherwise return @code{#f}.
+@end deffn
 
-@defun block-valid? block
+@deffn {Scheme Procedure} block-valid? block
 Returns @code{#t} if @code{<gdb:block>} @var{block} is valid,
 @code{#f} if not.  A block object can become invalid if the block it
 refers to doesn't exist anymore in the inferior.  All other
 @code{<gdb:block>} methods will throw an exception if it is invalid at
 the time the procedure is called.  The block's validity is also checked
 during iteration over symbols of the block.
-@end defun
+@end deffn
 
-@defun block-start block
+@deffn {Scheme Procedure} block-start block
 Return the start address of @code{<gdb:block>} @var{block}.
-@end defun
+@end deffn
 
-@defun block-end block
+@deffn {Scheme Procedure} block-end block
 Return the end address of @code{<gdb:block>} @var{block}.
-@end defun
+@end deffn
 
-@defun block-function block
+@deffn {Scheme Procedure} block-function block
 Return the name of @code{<gdb:block>} @var{block} represented as a
 @code{<gdb:symbol>} object.
 If the block is not named, then @code{#f} is returned.
@@ -1889,54 +2011,56 @@ For ordinary function blocks, the superblock is the static block.
 However, you should note that it is possible for a function block to
 have a superblock that is not the static block -- for instance this
 happens for an inlined function.
-@end defun
+@end deffn
 
-@defun block-superblock block
+@deffn {Scheme Procedure} block-superblock block
 Return the block containing @code{<gdb:block>} @var{block}.
 If the parent block does not exist, then @code{#f} is returned.
-@end defun
+@end deffn
 
-@defun block-global-block block
+@deffn {Scheme Procedure} block-global-block block
 Return the global block associated with @code{<gdb:block>} @var{block}.
-@end defun
+@end deffn
 
-@defun block-static-block block
+@deffn {Scheme Procedure} block-static-block block
 Return the static block associated with @code{<gdb:block>} @var{block}.
-@end defun
+@end deffn
 
-@defun block-global? block
+@deffn {Scheme Procedure} block-global? block
 Return @code{#t} if @code{<gdb:block>} @var{block} is a global block.
-@end defun
+Otherwise return @code{#f}.
+@end deffn
 
-@defun block-static? block
+@deffn {Scheme Procedure} block-static? block
 Return @code{#t} if @code{<gdb:block>} @var{block} is a static block.
-@end defun
+Otherwise return @code{#f}.
+@end deffn
 
-@defun block-symbols
+@deffn {Scheme Procedure} block-symbols
 Return a list of all symbols (as <gdb:symbol> objects) in
 @code{<gdb:block>} @var{block}.
-@end defun
+@end deffn
 
-@defun make-block-symbols-iterator block
+@deffn {Scheme Procedure} make-block-symbols-iterator block
 Return an object of type @code{<gdb:iterator>} that will iterate
 over all symbols of the block.
 Guile programs should not assume that a specific block object will
 always contain a given symbol, since changes in @value{GDBN} features and
 infrastructure may cause symbols move across blocks in a symbol table.
-@end defun
+@xref{Iterators In Guile}.
+@end deffn
 
-@defun block-symbols-progress?
+@deffn {Scheme Procedure} block-symbols-progress?
 Return #t if the object is a <gdb:block-symbols-progress> object.
 This object would be obtained from the @code{progress} element of the
 @code{<gdb:iterator>} object returned by @code{make-block-symbols-iterator}.
-@xref{Iterators In Guile}.
-@end defun
+@end deffn
 
-@defun lookup-block pc
+@deffn {Scheme Procedure} lookup-block pc
 Return the innermost @code{<gdb:block>} containing the given @var{pc}
 value.  If the block cannot be found for the @var{pc} value specified,
 the function will return @code{#f}.
-@end defun
+@end deffn
 
 @node Symbols In Guile
 @subsubsection Guile representation of Symbols.
@@ -1952,87 +2076,92 @@ Guile represents these symbols in @value{GDBN} with the
 The following symbol-related procedures are provided by the
 @code{(gdb)} module:
 
-@defun symbol? object
+@deffn {Scheme Procedure} symbol? object
 Return @code{#t} if @var{object} is an object of type @code{<gdb:symbol>}.
-@end defun
+Otherwise return @code{#f}.
+@end deffn
 
-@defun symbol-valid? symbol
+@deffn {Scheme Procedure} symbol-valid? symbol
 Return @code{#t} if the @code{<gdb:symbol>} object is valid,
 @code{#f} if not.  A @code{<gdb:symbol>} object can become invalid if
 the symbol it refers to does not exist in @value{GDBN} any longer.
 All other @code{<gdb:symbol>} procedures will throw an exception if it is
 invalid at the time the procedure is called.
-@end defun
+@end deffn
 
-@defun symbol-type symbol
+@deffn {Scheme Procedure} symbol-type symbol
 Return the type of @var{symbol} or @code{#f} if no type is recorded.
 The result is an object of type @code{<gdb:type>}.
 @xref{Types In Guile}.
-@end defun
+@end deffn
 
-@defun symbol-symtab symbol
+@deffn {Scheme Procedure} symbol-symtab symbol
 Return the symbol table in which @var{symbol} appears.
 The result is an object of type @code{<gdb:symtab>}.
 @xref{Symbol Tables In Guile}.
-@end defun
+@end deffn
 
-@defun symbol-line symbol
+@deffn {Scheme Procedure} symbol-line symbol
 Return the line number in the source code at which @var{symbol} was defined.
 This is an integer.
-@end defun
+@end deffn
 
-@defun symbol-name symbol
+@deffn {Scheme Procedure} symbol-name symbol
 Return the name of @var{symbol} as a string.
-@end defun
+@end deffn
 
-@defun symbol-linkage-name symbol
+@deffn {Scheme Procedure} symbol-linkage-name symbol
 Return the name of @var{symbol}, as used by the linker (i.e., may be mangled).
-@end defun
+@end deffn
 
-@defun symbol-print-name symbol
+@deffn {Scheme Procedure} symbol-print-name symbol
 Return the name of @var{symbol} in a form suitable for output.  This is either
 @code{name} or @code{linkage_name}, depending on whether the user
 asked @value{GDBN} to display demangled or mangled names.
-@end defun
+@end deffn
 
-@defun symbol-addr-class symbol
+@deffn {Scheme Procedure} symbol-addr-class symbol
 Return the address class of the symbol.  This classifies how to find the value
 of a symbol.  Each address class is a constant defined in the
 @code{(gdb)} module and described later in this chapter.
-@end defun
+@end deffn
 
-@defun symbol-needs-frame? symbol
+@deffn {Scheme Procedure} symbol-needs-frame? symbol
 Return @code{#t} if evaluating @var{symbol}'s value requires a frame
 (@pxref{Frames In Guile}) and @code{#f} otherwise.  Typically,
 local variables will require a frame, but other symbols will not.
-@end defun
+@end deffn
 
-@defun symbol-argument? symbol
+@deffn {Scheme Procedure} symbol-argument? symbol
 Return @code{#t} if @var{symbol} is an argument of a function.
-@end defun
+Otherwise return @code{#f}.
+@end deffn
 
-@defun symbol-constant? symbol
+@deffn {Scheme Procedure} symbol-constant? symbol
 Return @code{#t} if @var{symbol} is a constant.
-@end defun
+Otherwise return @code{#f}.
+@end deffn
 
-@defun symbol-function? symbol
+@deffn {Scheme Procedure} symbol-function? symbol
 Return @code{#t} if @var{symbol} is a function or a method.
-@end defun
+Otherwise return @code{#f}.
+@end deffn
 
-@defun symbol-variable? symbol
+@deffn {Scheme Procedure} symbol-variable? symbol
 Return @code{#t} if @var{symbol} is a variable.
-@end defun
+Otherwise return @code{#f}.
+@end deffn
 
-@defun symbol-value symbol @r{[}#:frame frame@r{]}
+@deffn {Scheme Procedure} symbol-value symbol @r{[}#:frame frame@r{]}
 Compute the value of @var{symbol}, as a @code{<gdb:value>}.  For
 functions, this computes the address of the function, cast to the
 appropriate type.  If the symbol requires a frame in order to compute
 its value, then @var{frame} must be given.  If @var{frame} is not
 given, or if @var{frame} is invalid, then an exception is thrown.
-@end defun
+@end deffn
 
 @c TODO: line length
-@defun lookup-symbol name @r{[}#:block block@r{]} @r{[}#:domain domain@r{]}
+@deffn {Scheme Procedure} lookup-symbol name @r{[}#:block block@r{]} @r{[}#:domain domain@r{]}
 This function searches for a symbol by name.  The search scope can be
 restricted to the parameters defined in the optional domain and block
 arguments.
@@ -2053,9 +2182,9 @@ If the symbol is found, the second element is @code{#t} if the symbol
 is a field of a method's object (e.g., @code{this} in C@t{++}),
 otherwise it is @code{#f}.
 If the symbol is not found, the second element is @code{#f}.
-@end defun
+@end deffn
 
-@defun lookup-global-symbol name @r{[}#:domain domain@r{]}
+@deffn {Scheme Procedure} lookup-global-symbol name @r{[}#:domain domain@r{]}
 This function searches for a global symbol by name.
 The search scope can be restricted by the domain argument.
 
@@ -2066,95 +2195,93 @@ module and described later in this chapter.
 
 The result is a @code{<gdb:symbol>} object or @code{#f} if the symbol
 is not found.
-@end defun
+@end deffn
 
 The available domain categories in @code{<gdb:symbol>} are represented
 as constants in the @code{(gdb)} module:
 
-@table @code
-@findex SYMBOL_UNDEF_DOMAIN
+@vtable @code
 @item SYMBOL_UNDEF_DOMAIN
 This is used when a domain has not been discovered or none of the
 following domains apply.  This usually indicates an error either
 in the symbol information or in @value{GDBN}'s handling of symbols.
-@findex SYMBOL_VAR_DOMAIN
+
 @item SYMBOL_VAR_DOMAIN
 This domain contains variables, function names, typedef names and enum
 type values.
-@findex SYMBOL_STRUCT_DOMAIN
+
 @item SYMBOL_STRUCT_DOMAIN
 This domain holds struct, union and enum type names.
-@findex SYMBOL_LABEL_DOMAIN
+
 @item SYMBOL_LABEL_DOMAIN
 This domain contains names of labels (for gotos).
-@findex SYMBOL_VARIABLES_DOMAIN
+
 @item SYMBOL_VARIABLES_DOMAIN
 This domain holds a subset of the @code{SYMBOLS_VAR_DOMAIN}; it
 contains everything minus functions and types.
-@findex SYMBOL_FUNCTIONS_DOMAIN
+
 @item SYMBOL_FUNCTION_DOMAIN
 This domain contains all functions.
-@findex SYMBOL_TYPES_DOMAIN
+
 @item SYMBOL_TYPES_DOMAIN
 This domain contains all types.
-@end table
+@end vtable
 
 The available address class categories in @code{<gdb:symbol>} are represented
 as constants in the @code{gdb} module:
 
-@table @code
-@findex SYMBOL_LOC_UNDEF
+@vtable @code
 @item SYMBOL_LOC_UNDEF
 If this is returned by address class, it indicates an error either in
 the symbol information or in @value{GDBN}'s handling of symbols.
-@findex SYMBOL_LOC_CONST
+
 @item SYMBOL_LOC_CONST
 Value is constant int.
-@findex SYMBOL_LOC_STATIC
+
 @item SYMBOL_LOC_STATIC
 Value is at a fixed address.
-@findex SYMBOL_LOC_REGISTER
+
 @item SYMBOL_LOC_REGISTER
 Value is in a register.
-@findex SYMBOL_LOC_ARG
+
 @item SYMBOL_LOC_ARG
 Value is an argument.  This value is at the offset stored within the
 symbol inside the frame's argument list.
-@findex SYMBOL_LOC_REF_ARG
+
 @item SYMBOL_LOC_REF_ARG
 Value address is stored in the frame's argument list.  Just like
 @code{LOC_ARG} except that the value's address is stored at the
 offset, not the value itself.
-@findex SYMBOL_LOC_REGPARM_ADDR
+
 @item SYMBOL_LOC_REGPARM_ADDR
 Value is a specified register.  Just like @code{LOC_REGISTER} except
 the register holds the address of the argument instead of the argument
 itself.
-@findex SYMBOL_LOC_LOCAL
+
 @item SYMBOL_LOC_LOCAL
 Value is a local variable.
-@findex SYMBOL_LOC_TYPEDEF
+
 @item SYMBOL_LOC_TYPEDEF
 Value not used.  Symbols in the domain @code{SYMBOL_STRUCT_DOMAIN} all
 have this class.
-@findex SYMBOL_LOC_BLOCK
+
 @item SYMBOL_LOC_BLOCK
 Value is a block.
-@findex SYMBOL_LOC_CONST_BYTES
+
 @item SYMBOL_LOC_CONST_BYTES
 Value is a byte-sequence.
-@findex SYMBOL_LOC_UNRESOLVED
+
 @item SYMBOL_LOC_UNRESOLVED
 Value is at a fixed address, but the address of the variable has to be
 determined from the minimal symbol table whenever the variable is
 referenced.
-@findex SYMBOL_LOC_OPTIMIZED_OUT
+
 @item SYMBOL_LOC_OPTIMIZED_OUT
 The value does not actually exist in the program.
-@findex SYMBOL_LOC_COMPUTED
+
 @item SYMBOL_LOC_COMPUTED
 The value's address is a computed location.
-@end table
+@end vtable
 
 @node Symbol Tables In Guile
 @subsubsection Symbol table representation in Guile.
@@ -2175,77 +2302,79 @@ For more information on @value{GDBN}'s symbol table management, see
 The following symtab-related procedures are provided by the
 @code{(gdb)} module:
 
-@defun symtab? object
+@deffn {Scheme Procedure} symtab? object
 Return @code{#t} if @var{object} is an object of type @code{<gdb:symtab>}.
-@end defun
+Otherwise return @code{#f}.
+@end deffn
 
-@defun symtab-valid? symtab
+@deffn {Scheme Procedure} symtab-valid? symtab
 Return @code{#t} if the @code{<gdb:symtab>} object is valid,
 @code{#f} if not.  A @code{<gdb:symtab>} object becomes invalid when
 the symbol table it refers to no longer exists in @value{GDBN}.
 All other @code{<gdb:symtab>} procedures will throw an exception
 if it is invalid at the time the procedure is called.
-@end defun
+@end deffn
 
-@defun symtab-filename symtab
+@deffn {Scheme Procedure} symtab-filename symtab
 Return the symbol table's source filename.
-@end defun
+@end deffn
 
-@defun symtab-fullname symtab
+@deffn {Scheme Procedure} symtab-fullname symtab
 Return the symbol table's source absolute file name.
-@end defun
+@end deffn
 
-@defun symtab-objfile symtab
+@deffn {Scheme Procedure} symtab-objfile symtab
 Return the symbol table's backing object file.  @xref{Objfiles In Guile}.
-@end defun
+@end deffn
 
-@defun symtab-global-block symtab
+@deffn {Scheme Procedure} symtab-global-block symtab
 Return the global block of the underlying symbol table.
 @xref{Blocks In Guile}.
-@end defun
+@end deffn
 
-@defun symtab-static-block symtab
+@deffn {Scheme Procedure} symtab-static-block symtab
 Return the static block of the underlying symbol table.
 @xref{Blocks In Guile}.
-@end defun
+@end deffn
 
 The following symtab-and-line-related procedures are provided by the
 @code{(gdb)} module:
 
-@defun sal? object
+@deffn {Scheme Procedure} sal? object
 Return @code{#t} if @var{object} is an object of type @code{<gdb:sal>}.
-@end defun
+Otherwise return @code{#f}.
+@end deffn
 
-@defun sal-valid? sal
+@deffn {Scheme Procedure} sal-valid? sal
 Return @code{#t} if @var{sal} is valid, @code{#f} if not.
 A @code{<gdb:sal>} object becomes invalid when the Symbol table object
 it refers to no longer exists in @value{GDBN}.  All other
 @code{<gdb:sal>} procedures will throw an exception if it is
 invalid at the time the procedure is called.
-@end defun
+@end deffn
 
-@defun sal-symtab sal
+@deffn {Scheme Procedure} sal-symtab sal
 Return the symbol table object (@code{<gdb:symtab>}) for @var{sal}.
-@end defun
+@end deffn
 
-@defun sal-line sal
+@deffn {Scheme Procedure} sal-line sal
 Return the line number for @var{sal}.
-@end defun
+@end deffn
 
-@defun sal-pc sal
+@deffn {Scheme Procedure} sal-pc sal
 Return the start of the address range occupied by code for @var{sal}.
-@end defun
+@end deffn
 
-@defun sal-last sal
+@deffn {Scheme Procedure} sal-last sal
 Return the end of the address range occupied by code for @var{sal}.
-@end defun
+@end deffn
 
-@defun find-pc-line pc
+@deffn {Scheme Procedure} find-pc-line pc
 Return the @code{<gdb:sal>} object corresponding to the @var{pc} value.
 If an invalid value of @var{pc} is passed as an argument, then the
 @code{symtab} and @code{line} attributes of the returned @code{<gdb:sal>}
 object will be @code{#f} and 0 respectively.
-@end defun
+@end deffn
 
 @node Breakpoints In Guile
 @subsubsection Manipulating breakpoints using Guile
@@ -2260,7 +2389,7 @@ The following breakpoint-related procedures are provided by the
 @code{(gdb)} module:
 
 @c TODO: line length
-@defun make-breakpoint location @r{[}#:type type@r{]} @r{[}#:wp-class wp-class@r{]} @r{[}#:internal internal@r{]}
+@deffn {Scheme Procedure} create-breakpoint! location @r{[}#:type type@r{]} @r{[}#:wp-class wp-class@r{]} @r{[}#:internal internal@r{]}
 Create a new breakpoint.  @var{spec} is a string naming the
 location of the breakpoint, or an expression that defines a watchpoint.
 The contents can be any location recognized by the @code{break} command,
@@ -2291,180 +2420,173 @@ If not successful, the type of the watchpoint is left as @code{WP_WATCHPOINT}.
 The available types are represented by constants defined in the @code{gdb}
 module:
 
-@table @code
-@findex BP_BREAKPOINT
+@vtable @code
 @item BP_BREAKPOINT
 Normal code breakpoint.
 
-@findex BP_WATCHPOINT
 @item BP_WATCHPOINT
 Watchpoint breakpoint.
 
-@findex BP_HARDWARE_WATCHPOINT
 @item BP_HARDWARE_WATCHPOINT
 Hardware assisted watchpoint.
 This value cannot be specified when creating the breakpoint.
 
-@findex BP_READ_WATCHPOINT
 @item BP_READ_WATCHPOINT
 Hardware assisted read watchpoint.
 This value cannot be specified when creating the breakpoint.
 
-@findex BP_ACCESS_WATCHPOINT
 @item BP_ACCESS_WATCHPOINT
 Hardware assisted access watchpoint.
 This value cannot be specified when creating the breakpoint.
-@end table
+@end vtable
 
 The available watchpoint types represented by constants are defined in the
 @code{(gdb)} module:
 
-@table @code
-@findex WP_READ
+@vtable @code
 @item WP_READ
 Read only watchpoint.
 
-@findex WP_WRITE
 @item WP_WRITE
 Write only watchpoint.
 
-@findex WP_ACCESS
 @item WP_ACCESS
 Read/Write watchpoint.
-@end table
+@end vtable
 
-@end defun
+@end deffn
 
-@defun breakpoint-delete! breakpoint
+@deffn {Scheme Procedure} breakpoint-delete! breakpoint
 Permanently delete @var{breakpoint}.  This also invalidates the
 Guile @var{breakpoint} object.  Any further attempt to access the
 object will throw an exception.
-@end defun
+@end deffn
 
-@defun breakpoints
+@deffn {Scheme Procedure} breakpoints
 Return a list of all breakpoints.
 Each element of the list is a @code{<gdb:breakpoint>} object.
-@end defun
+@end deffn
 
-@defun breakpoint? object
+@deffn {Scheme Procedure} breakpoint? object
 Return @code{#t} if @var{object} is a @code{<gdb:breakpoint>} object,
 and @code{#f} otherwise.
-@end defun
+@end deffn
 
-@defun breakpoint-valid? breakpoint
+@deffn {Scheme Procedure} breakpoint-valid? breakpoint
 Return @code{#t} if @var{breakpoint} is valid, @code{#f} otherwise.
 A @code{<gdb:breakpoint>} object can become invalid
 if the user deletes the breakpoint.  In this case, the object still
 exists, but the underlying breakpoint does not.  In the cases of
 watchpoint scope, the watchpoint remains valid even if execution of the
 inferior leaves the scope of that watchpoint.
-@end defun
+@end deffn
 
-@defun breakpoint-number breakpoint
+@deffn {Scheme Procedure} breakpoint-number breakpoint
 Return the breakpoint's number --- the identifier used by
 the user to manipulate the breakpoint.
-@end defun
+@end deffn
 
-@defun breakpoint-type breakpoint
+@deffn {Scheme Procedure} breakpoint-type breakpoint
 Return the breakpoint's type --- the identifier used to
 determine the actual breakpoint type or use-case.
-@end defun
+@end deffn
 
-@defun breakpoint-visible? breakpoint
+@deffn {Scheme Procedure} breakpoint-visible? breakpoint
 Return @code{#t} if the breakpoint is visible to the user
 when hit, or when the @samp{info breakpoints} command is run.
-@end defun
+Otherwise return @code{#f}.
+@end deffn
 
-@defun breakpoint-location breakpoint
+@deffn {Scheme Procedure} breakpoint-location breakpoint
 Return the location of the breakpoint, as specified by
 the user.  It is a string.  If the breakpoint does not have a location
 (that is, it is a watchpoint) return @code{#f}.
-@end defun
+@end deffn
 
-@defun breakpoint-expression breakpoint
+@deffn {Scheme Procedure} breakpoint-expression breakpoint
 Return the breakpoint expression, as specified by the user.  It is a string.
 If the breakpoint does not have an expression (the breakpoint is not a
 watchpoint) return @code{#f}.
-@end defun
+@end deffn
 
-@defun breakpoint-enabled? breakpoint
+@deffn {Scheme Procedure} breakpoint-enabled? breakpoint
 Return @code{#t} if the breakpoint is enabled, and @code{#f} otherwise.
-@end defun
+@end deffn
 
-@defun set-breakpoint-enabled! breakpoint flag
+@deffn {Scheme Procedure} set-breakpoint-enabled! breakpoint flag
 Set the enabled state of @var{breakpoint} to @var{flag}.
 If flag is @code{#f} it is disabled, otherwise it is enabled.
-@end defun
+@end deffn
 
-@defun breakpoint-silent? breakpoint
+@deffn {Scheme Procedure} breakpoint-silent? breakpoint
 Return @code{#t} if the breakpoint is silent, and @code{#f} otherwise.
 
 Note that a breakpoint can also be silent if it has commands and the
 first command is @code{silent}.  This is not reported by the
 @code{silent} attribute.
-@end defun
+@end deffn
 
-@defun set-breakpoint-silent! breakpoint flag
+@deffn {Scheme Procedure} set-breakpoint-silent! breakpoint flag
 Set the silent state of @var{breakpoint} to @var{flag}.
 If flag is @code{#f} the breakpoint is made silent,
 otherwise it is made non-silent (or noisy).
-@end defun
+@end deffn
 
-@defun breakpoint-ignore-count breakpoint
+@deffn {Scheme Procedure} breakpoint-ignore-count breakpoint
 Return the ignore count for @var{breakpoint}.
-@end defun
+@end deffn
 
-@defun set-breakpoint-ignore-count! breakpoint count
+@deffn {Scheme Procedure} set-breakpoint-ignore-count! breakpoint count
 Set the ignore count for @var{breakpoint} to @var{count}.
-@end defun
+@end deffn
 
-@defun breakpoint-hit-count breakpoint
+@deffn {Scheme Procedure} breakpoint-hit-count breakpoint
 Return hit count of @var{breakpoint}.
-@end defun
+@end deffn
 
-@defun set-breakpoint-hit-count! breakpoint count
+@deffn {Scheme Procedure} set-breakpoint-hit-count! breakpoint count
 Set the hit count of @var{breakpoint} to @var{count}.
 At present, @var{count} must be zero.
-@end defun
+@end deffn
 
-@defun breakpoint-thread breakpoint
+@deffn {Scheme Procedure} breakpoint-thread breakpoint
 Return the thread-id for thread-specific breakpoint @var{breakpoint}.
 Return #f if @var{breakpoint} is not thread-specific.
-@end defun
+@end deffn
 
-@defun set-breakpoint-thread! breakpoint thread-id|#f
+@deffn {Scheme Procedure} set-breakpoint-thread! breakpoint thread-id|#f
 Set the thread-id for @var{breakpoint} to @var{thread-id}.
 If set to @code{#f}, the breakpoint is no longer thread-specific.
-@end defun
+@end deffn
 
-@defun breakpoint-task breakpoint
+@deffn {Scheme Procedure} breakpoint-task breakpoint
 If the breakpoint is Ada task-specific, return the Ada task id.
 If the breakpoint is not task-specific (or the underlying
 language is not Ada), return @code{#f}.
-@end defun
+@end deffn
 
-@defun set-breakpoint-task! breakpoint task
+@deffn {Scheme Procedure} set-breakpoint-task! breakpoint task
 Set the Ada task of @var{breakpoint} to @var{task}.
 If set to @code{#f}, the breakpoint is no longer task-specific.
-@end defun
+@end deffn
 
-@defun breakpoint-condition breakpoint
+@deffn {Scheme Procedure} breakpoint-condition breakpoint
 Return the condition of @var{breakpoint}, as specified by the user.
 It is a string.  If there is no condition, return @code{#f}.
-@end defun
+@end deffn
 
-@defun set-breakpoint-condition! breakpoint condition
+@deffn {Scheme Procedure} set-breakpoint-condition! breakpoint condition
 Set the condition of @var{breakpoint} to @var{condition},
 which must be a string.  If set to @code{#f} then the breakpoint
 becomes unconditional.
-@end defun
+@end deffn
 
-@defun breakpoint-stop breakpoint
+@deffn {Scheme Procedure} breakpoint-stop breakpoint
 Return the stop predicate of @var{breakpoint}.
 See @code{set-breakpoint-stop!} below in this section.
-@end defun
+@end deffn
 
-@defun set-breakpoint-stop! breakpoint procedure|#f
+@deffn {Scheme Procedure} set-breakpoint-stop! breakpoint procedure|#f
 Set the stop predicate of @var{breakpoint}.
 @var{procedure} takes one argument: the <gdb:breakpoint> object.
 If this predicate is set to a procedure then it is invoked whenever
@@ -2491,15 +2613,15 @@ Example @code{stop} implementation:
 (define (my-stop? bkpt)
   (let ((int-val (parse-and-eval "foo")))
     (value=? int-val 3)))
-(define bkpt (make-breakpoint "main.c:42"))
+(define bkpt (create-breakpoint! "main.c:42"))
 (set-breakpoint-stop! bkpt my-stop?)
 @end smallexample
-@end defun
+@end deffn
 
-@defun breakpoint-commands breakpoint
+@deffn {Scheme Procedure} breakpoint-commands breakpoint
 Return the commands attached to @var{breakpoint} as a string,
 or @code{#f} if there are none.
-@end defun
+@end deffn
 
 @node Lazy Strings In Guile
 @subsubsection Guile representation of lazy strings.
@@ -2523,40 +2645,41 @@ wrapping a string is immediately retrieved and encoded on creation.
 The following lazy-string-related procedures are provided by the
 @code{(gdb)} module:
 
-@defun lazy-string? object
+@deffn {Scheme Procedure} lazy-string? object
 Return @code{#t} if @var{object} is an object of type @code{<gdb:lazy-string>}.
-@end defun
+Otherwise return @code{#f}.
+@end deffn
 
-@defun lazy-string-address lazy-sring
+@deffn {Scheme Procedure} lazy-string-address lazy-sring
 Return the address of @var{lazy-string}.
-@end defun
+@end deffn
 
-@defun lazy-string-length lazy-string
+@deffn {Scheme Procedure} lazy-string-length lazy-string
 Return the length of @var{lazy-string} in characters.  If the
 length is -1, then the string will be fetched and encoded up to the
 first null of appropriate width.
-@end defun
+@end deffn
 
-@defun lazy-string-encoding lazy-string
+@deffn {Scheme Procedure} lazy-string-encoding lazy-string
 Return the encoding that will be applied to @var{lazy-string}
 when the string is printed by @value{GDBN}.  If the encoding is not
 set, or contains an empty string,  then @value{GDBN} will select the
 most appropriate encoding when the string is printed.
-@end defun
+@end deffn
 
-@defun lazy-string-type lazy-string
+@deffn {Scheme Procedure} lazy-string-type lazy-string
 Return the type that is represented by @var{lazy-string}'s type.
 For a lazy string this will always be a pointer type.  To
 resolve this to the lazy string's character type, use @code{type-target-type}.
 @xref{Types In Guile}.
-@end defun
+@end deffn
 
-@defun lazy-string->value lazy-string
+@deffn {Scheme Procedure} lazy-string->value lazy-string
 Convert the @code{<gdb:lazy-string>} to a @code{<gdb:value>}.  This value
 will point to the string in memory, but will lose all the delayed
 retrieval, encoding and handling that @value{GDBN} applies to a
 @code{<gdb:lazy-string>}.
-@end defun
+@end deffn
 
 @node Architectures In Guile
 @subsubsection Guile representation of architectures
@@ -2571,148 +2694,149 @@ by an instance of the @code{<gdb:arch>} class.
 The following architecture-related procedures are provided by the
 @code{(gdb)} module:
 
-@defun arch? object
+@deffn {Scheme Procedure} arch? object
 Return @code{#t} if @var{object} is an object of type @code{<gdb:arch>}.
-@end defun
+Otherwise return @code{#f}.
+@end deffn
 
-@defun current-arch
+@deffn {Scheme Procedure} current-arch
 Return the current architecture as a @code{<gdb:arch>} object.
-@end defun
+@end deffn
 
-@defun arch-name arch
+@deffn {Scheme Procedure} arch-name arch
 Return the name (string value) of @code{<gdb:arch>} @var{arch}.
-@end defun
+@end deffn
 
-@defun arch-charset arch
+@deffn {Scheme Procedure} arch-charset arch
 Return name of target character set of @code{<gdb:arch>} @var{arch}.
-@end defun
+@end deffn
 
-@defun arch-wide-charset
+@deffn {Scheme Procedure} arch-wide-charset
 Return name of target wide character set of @code{<gdb:arch>} @var{arch}.
-@end defun
+@end deffn
 
 Each architecture provides a set of predefined types, obtained by
 the following functions.
 
-@defun arch-void-type arch
+@deffn {Scheme Procedure} arch-void-type arch
 Return the @code{<gdb:type>} object for a @code{void} type
 of architecture @var{arch}.
-@end defun
+@end deffn
 
-@defun arch-char-type arch
+@deffn {Scheme Procedure} arch-char-type arch
 Return the @code{<gdb:type>} object for a @code{char} type
 of architecture @var{arch}.
-@end defun
+@end deffn
 
-@defun arch-short-type arch
+@deffn {Scheme Procedure} arch-short-type arch
 Return the @code{<gdb:type>} object for a @code{short} type
 of architecture @var{arch}.
-@end defun
+@end deffn
 
-@defun arch-int-type arch
+@deffn {Scheme Procedure} arch-int-type arch
 Return the @code{<gdb:type>} object for an @code{int} type
 of architecture @var{arch}.
-@end defun
+@end deffn
 
-@defun arch-long-type arch
+@deffn {Scheme Procedure} arch-long-type arch
 Return the @code{<gdb:type>} object for a @code{long} type
 of architecture @var{arch}.
-@end defun
+@end deffn
 
-@defun arch-schar-type arch
+@deffn {Scheme Procedure} arch-schar-type arch
 Return the @code{<gdb:type>} object for a @code{signed char} type
 of architecture @var{arch}.
-@end defun
+@end deffn
 
-@defun arch-uchar-type arch
+@deffn {Scheme Procedure} arch-uchar-type arch
 Return the @code{<gdb:type>} object for an @code{unsigned char} type
 of architecture @var{arch}.
-@end defun
+@end deffn
 
-@defun arch-ushort-type arch
+@deffn {Scheme Procedure} arch-ushort-type arch
 Return the @code{<gdb:type>} object for an @code{unsigned short} type
 of architecture @var{arch}.
-@end defun
+@end deffn
 
-@defun arch-uint-type arch
+@deffn {Scheme Procedure} arch-uint-type arch
 Return the @code{<gdb:type>} object for an @code{unsigned int} type
 of architecture @var{arch}.
-@end defun
+@end deffn
 
-@defun arch-ulong-type arch
+@deffn {Scheme Procedure} arch-ulong-type arch
 Return the @code{<gdb:type>} object for an @code{unsigned long} type
 of architecture @var{arch}.
-@end defun
+@end deffn
 
-@defun arch-float-type arch
+@deffn {Scheme Procedure} arch-float-type arch
 Return the @code{<gdb:type>} object for a @code{float} type
 of architecture @var{arch}.
-@end defun
+@end deffn
 
-@defun arch-double-type arch
+@deffn {Scheme Procedure} arch-double-type arch
 Return the @code{<gdb:type>} object for a @code{double} type
 of architecture @var{arch}.
-@end defun
+@end deffn
 
-@defun arch-longdouble-type arch
+@deffn {Scheme Procedure} arch-longdouble-type arch
 Return the @code{<gdb:type>} object for a @code{long double} type
 of architecture @var{arch}.
-@end defun
+@end deffn
 
-@defun arch-bool-type arch
+@deffn {Scheme Procedure} arch-bool-type arch
 Return the @code{<gdb:type>} object for a @code{bool} type
 of architecture @var{arch}.
-@end defun
+@end deffn
 
-@defun arch-longlong-type arch
+@deffn {Scheme Procedure} arch-longlong-type arch
 Return the @code{<gdb:type>} object for a @code{long long} type
 of architecture @var{arch}.
-@end defun
+@end deffn
 
-@defun arch-ulonglong-type arch
+@deffn {Scheme Procedure} arch-ulonglong-type arch
 Return the @code{<gdb:type>} object for an @code{unsigned long long} type
 of architecture @var{arch}.
-@end defun
+@end deffn
 
-@defun arch-int8-type arch
+@deffn {Scheme Procedure} arch-int8-type arch
 Return the @code{<gdb:type>} object for an @code{int8} type
 of architecture @var{arch}.
-@end defun
+@end deffn
 
-@defun arch-uint8-type arch
+@deffn {Scheme Procedure} arch-uint8-type arch
 Return the @code{<gdb:type>} object for a @code{uint8} type
 of architecture @var{arch}.
-@end defun
+@end deffn
 
-@defun arch-int16-type arch
+@deffn {Scheme Procedure} arch-int16-type arch
 Return the @code{<gdb:type>} object for an @code{int16} type
 of architecture @var{arch}.
-@end defun
+@end deffn
 
-@defun arch-uint16-type arch
+@deffn {Scheme Procedure} arch-uint16-type arch
 Return the @code{<gdb:type>} object for a @code{uint16} type
 of architecture @var{arch}.
-@end defun
+@end deffn
 
-@defun arch-int32-type arch
+@deffn {Scheme Procedure} arch-int32-type arch
 Return the @code{<gdb:type>} object for an @code{int32} type
 of architecture @var{arch}.
-@end defun
+@end deffn
 
-@defun arch-uint32-type arch
+@deffn {Scheme Procedure} arch-uint32-type arch
 Return the @code{<gdb:type>} object for a @code{uint32} type
 of architecture @var{arch}.
-@end defun
+@end deffn
 
-@defun arch-int64-type arch
+@deffn {Scheme Procedure} arch-int64-type arch
 Return the @code{<gdb:type>} object for an @code{int64} type
 of architecture @var{arch}.
-@end defun
+@end deffn
 
-@defun arch-uint64-type arch
+@deffn {Scheme Procedure} arch-uint64-type arch
 Return the @code{<gdb:type>} object for a @code{uint64} type
 of architecture @var{arch}.
-@end defun
+@end deffn
 
 Example:
 
@@ -2729,7 +2853,7 @@ Furthermore, the disassembler can take a Guile port as input,
 allowing one to disassemble from any source, and not just target memory.
 
 @c TODO: line length
-@defun arch-disassemble arch @var{start-pc} @r{[}#:port port@r{]} @r{[}#:offset offset@r{]} @r{[}#:size @var{size}@r{]} @r{[}#:count @var{count}@r{]})
+@deffn {Scheme Procedure} arch-disassemble arch start-pc @r{[}#:port port@r{]} @r{[}#:offset offset@r{]} @r{[}#:size size@r{]} @r{[}#:count count@r{]})
 Return a list of disassembled instructions starting from the memory
 address @var{start-pc}.
 
@@ -2790,22 +2914,27 @@ variable @code{disassembly-flavor}.  @xref{Machine Code}.
 The value corresponding to this key is the length of the instruction in bytes.
 
 @end table
-@end defun
+@end deffn
 
 @node I/O Ports in Guile
 @subsubsection I/O Ports in Guile
 
-@defun input-port
+@deffn {Scheme Procedure} input-port
 Return @value{GDBN}'s input port as a Guile port object.
-@end defun
+@end deffn
 
-@defun output-port
+@deffn {Scheme Procedure} output-port
 Return @value{GDBN}'s output port as a Guile port object.
-@end defun
+@end deffn
 
-@defun error-port
+@deffn {Scheme Procedure} error-port
 Return @value{GDBN}'s error port as a Guile port object.
-@end defun
+@end deffn
+
+@deffn {Scheme Procedure} stdio-port? object
+Return @code{#t} if @var{object} is a @value{GDBN} stdio port.
+Otherwise return @code{#f}.
+@end deffn
 
 @node Memory Ports in Guile
 @subsubsection Memory Ports in Guile
@@ -2815,7 +2944,7 @@ This allows Guile code to read/write target memory using Guile's port and
 bytevector functionality.  The main routine is @code{open-memory} which
 returns a port object.  One can then read/write memory using that object.
 
-@defun open-memory @r{[}#:mode mode{]} @r{[}#:start address{]} @r{[}#:size size{]}
+@deffn {Scheme Procedure} open-memory @r{[}#:mode mode{]} @r{[}#:start address{]} @r{[}#:size size{]}
 Return a port object that can be used for reading and writing memory.
 @var{mode} is the standard mode argument to Guile port open routines,
 except that it is restricted to one of @samp{"r"}, @samp{"w"}, or @samp{"r+"}.
@@ -2827,39 +2956,40 @@ The chunk of memory that can be accessed can be bounded.
 If both @var{start} and @var{size} are unspecified, all of memory can be
 accessed.  If only @var{start} is specified, all of memory from that point
 on can be accessed.  If only @var{size} if specified, all memory in the
-range [0,@var{size} can be accessed.  If both are specified, all memory
+range [0,@var{size}) can be accessed.  If both are specified, all memory
 in the rane [@var{start},@var{start}+@var{size}) can be accessed.
-@end defun
+@end deffn
 
-@defun memory-port?
+@deffn {Scheme Procedure} memory-port?
 Return @code{#t} if @var{object} is an object of type @code{<gdb:memory-port>}.
-@end defun
+Otherwise return @code{#f}.
+@end deffn
 
-@defun memory-port-range memory-port
+@deffn {Scheme Procedure} memory-port-range memory-port
 Return the range of @code{<gdb:memory-port>} @var{memory-port} as a list
 of two elements: @code{(start end)}.  The range is @var{start} to @var{end}
 inclusive.
-@end defun
+@end deffn
 
-@defun memory-port-read-buffer-size memory-port
+@deffn {Scheme Procedure} memory-port-read-buffer-size memory-port
 Return the size of the read buffer of @code{<gdb:memory-port>}
 @var{memory-port}.
-@end defun
+@end deffn
 
-@defun set-memory-port-read-buffer-size! memory-port size
+@deffn {Scheme Procedure} set-memory-port-read-buffer-size! memory-port size
 Set the size of the read buffer of @code{<gdb:memory-port>}
 @var{memory-port} to @var{size}.  The result is unspecified.
-@end defun
+@end deffn
 
-@defun memory-port-write-buffer-size memory-port
+@deffn {Scheme Procedure} memory-port-write-buffer-size memory-port
 Return the size of the write buffer of @code{<gdb:memory-port>}
 @var{memory-port}.
-@end defun
+@end deffn
 
-@defun set-memory-port-write-buffer-size! memory-port size
+@deffn {Scheme Procedure} set-memory-port-write-buffer-size! memory-port size
 Set the size of the write buffer of @code{<gdb:memory-port>}
 @var{memory-port} to @var{size}.  The result is unspecified.
-@end defun
+@end deffn
 
 A memory port is closed like any other port, with @code{close-port}.
 
@@ -2890,69 +3020,112 @@ one can do something like the following.
 @cindex guile iterators
 @tindex <gdb:iterator>
 
-An experimental iterator facility is provided to allow, for example,
+A simple iterator facility is provided to allow, for example,
 iterating over the set of program symbols without having to first
-construct a list of all of them.  Scheme has support for iterators via,
-for example, SRFI 41 and SRFI 45.  Hopefully something efficient and
-agreeable can be worked out that uses them or something else.
+construct a list of all of them.  A useful contribution would be
+to add support for SRFI 41 and SRFI 45.
 
-@defun make-iterator
+@deffn {Scheme Procedure} make-iterator object progress next!
 A @code{<gdb:iterator>} object is constructed with the @code{make-iterator}
 procedure.  It takes three arguments: the object to be iterated over,
 an object to record the progress of the iteration, and a procedure to
 return the next element in the iteration, or an implementation chosen value
 to denote the end of iteration.
 
+By convention, end of iteration is marked with @code{(end-of-iteration)},
+and may be tested with the @code{end-of-iteration?} predicate.
+The result of @code{(end-of-iteration)} is chosen so that it is not
+otherwise used by the @code{(gdb)} module.  If you are using
+@code{<gdb:iterator>} in your own code it is your responsibility to
+maintain this invariant.
+
 A trivial example for illustration's sake:
 
 @smallexample
-(use-modules (gdb experimental))
+(use-modules (gdb iterator))
 (define my-list (list 1 2 3))
-(define end-marker #f)
 (define iter (make-iterator my-list my-list
   (lambda (iter)
     (let ((l (iterator-progress iter)))
       (if (eq? l '())
-          end-marker
+          (end-of-iteration)
           (begin
            (set-iterator-progress! iter (cdr l))
            (car l)))))))
 @end smallexample
 
-It is not expected that iterators will be used like that,
-that was just for illustration's sake.
 Here is a slightly more realistic example, which computes a list of all the
 functions in @code{my-global-block}.
 
 @smallexample
-(use-modules (gdb experimental))
+(use-modules (gdb iterator))
 (define this-sal (find-pc-line (frame-pc (selected-frame))))
 (define this-symtab (sal-symtab this-sal))
 (define this-global-block (symtab-global-block this-symtab))
 (define syms-iter (make-block-symbols-iterator this-global-block))
-(define functions (iterator-filter symbol-function? syms-iter #f))
+(define functions (iterator-filter symbol-function? syms-iter))
 @end smallexample
-@end defun
+@end deffn
 
-These functions are provided to assist in writing the @code{next!} procedure:
+@deffn {Scheme Procedure} iterator? object
+Return @code{#t} if @var{object} is a @code{<gdb:iterator>} object.
+Otherwise return @code{#f}.
+@end deffn
 
-@table @code
-@item iterator-object
+@deffn {Scheme Procedure} iterator-object iterator
 Return the first argument that was passed to @code{make-iterator}.
 This is the object being iterated over.
+@end deffn
 
-@item iterator-progress
+@deffn {Scheme Procedure} iterator-progress iterator
 Return the object tracking iteration progress.
+@end deffn
 
-@item set-iterator-progress!
+@deffn {Scheme Procedure} set-iterator-progress! iterator new-value
 Set the object tracking iteration progress.
+@end deffn
 
-@item iterator-next!
+@deffn {Scheme Procedure} iterator-next! iterator
 Invoke the procedure that was the third argument to @code{make-iterator},
 passing it one argument, the @code{<gdb:iterator>} object.
-The result is either the next element in the iteration, or and end
+The result is either the next element in the iteration, or an end
 marker as implemented by the @code{next!} procedure.
-@end table
+By convention the end marker is the result of @code{(end-of-iteration)}.
+@end deffn
+
+@deffn {Scheme Procedure} end-of-iteration
+Return the Scheme object that denotes end of iteration.
+@end deffn
+
+@deffn {Scheme Procedure} end-of-iteration? object
+Return @code{#t} if @var{object} is the end of iteration marker.
+Otherwise return @code{#f}.
+@end deffn
+
+These functions are provided by the @code{(gdb iterator)} module to
+assist in using iterators.
+
+@deffn {Scheme Procedure} make-list-iterator list
+Return a @code{<gdb:iterator>} object that will iterate over @var{list}.
+@end deffn
+
+@deffn {Scheme Procedure} iterator-map proc iterator
+Return a list of @var{proc} applied to each element of @var{iterator}.
+@end deffn
+
+@deffn {Scheme Procedure} iterator-for-each proc iterator
+Apply @var{proc} to each element of @var{iterator}.
+The result is unspecified.
+@end deffn
+
+@deffn {Scheme Procedure} iterator-filter pred iterator
+Return as a list the elements of @var{iterator} that satisfy @var{pred}.
+@end deffn
+
+@deffn {Scheme Procedure} iterator-until pred iterator
+Run @var{iterator} until the result of @code{(pred element)} is true
+and return that as the result.  Otherwise return @code{#f}.
+@end deffn
 
 @node Guile Auto-loading
 @subsection Guile Auto-loading
@@ -3024,7 +3197,6 @@ registering objfile-specific pretty-printers.
 
 @node Guile Printing Module
 @subsubsection Guile Printing Module
-@cindex (gdb printing)
 
 This module provides a collection of utilities for working with
 pretty-printers.
@@ -3035,21 +3207,22 @@ Usage:
 (use-modules (gdb printing))
 @end smallexample
 
-@table @code
-@item prepend-pretty-printer! @var{obj} @var{printer}
-Add @var{printer} to the front of the list of pretty-printers for @var{obj}.
-@var{obj} must either be a @code{<gdb:objfile>} object or @code{#f} in which
-case @var{printer} is added to the global list of printers.
+@deffn {Scheme Procedure} prepend-pretty-printer! object printer
+Add @var{printer} to the front of the list of pretty-printers for
+@var{object}.  @var{object} must either be a @code{<gdb:objfile>} object
+or @code{#f} in which case @var{printer} is added to the global list of
+printers.
+@end deffn
 
-@item append-pretty-printer! @var{obj} @var{printer}
-Add @var{printer} to the end of the list of pretty-printers for @var{obj}.
-@var{obj} must either be a @code{<gdb:objfile>} object or @code{#f} in which
-case @var{printer} is added to the global list of printers.
-@end table
+@deffn {Scheme Procecure} append-pretty-printer! object printer
+Add @var{printer} to the end of the list of pretty-printers for
+@var{object}.  @var{object} must either be a @code{<gdb:objfile>} object
+or @code{#f} in which case @var{printer} is added to the global list of
+printers.
+@end deffn
 
 @node Guile Types Module
 @subsubsection Guile Types Module
-@cindex (gdb types)
 
 This module provides a collection of utilities for working with
 @code{<gdb:type>} objects.
@@ -3060,8 +3233,7 @@ Usage:
 (use-modules (gdb types))
 @end smallexample
 
-@table @code
-@item get-basic-type @var{type}
+@deffn {Scheme Procedure} get-basic-type type
 Return @var{type} with const and volatile qualifiers stripped,
 and with typedefs and C@t{++} references converted to the underlying type.
 
@@ -3083,13 +3255,16 @@ Then in gdb:
 (gdb) guile (get-basic-type (value-type foo-ref))
 int
 @end smallexample
+@end deffn
 
-@item type-has-field-deep? @var{type} @var{field}
+@deffn {Scheme Procedure} type-has-field-deep? type field
 Return @code{#t} if @var{type}, assumed to be a type with fields
 (e.g., a structure or union), has field @var{field}.
+Otherwise return @code{#f}.
 This searches baseclasses, whereas @code{type-has-field?} does not.
+@end deffn
 
-@item make-enum-hashtable @var{enum-type}
+@deffn {Scheme Procedure} make-enum-hashtable enum-type
 Return a Guile hash table produced from @var{enum-type}.
 Elements in the hash table are referenced with @code{hashq-ref}.
-@end table
+@end deffn

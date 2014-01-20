@@ -79,6 +79,7 @@ GUILE_FILES = \
 	gdb/boot.scm \
 	gdb/experimental.scm \
 	gdb/init.scm \
+	gdb/iterator.scm \
 	gdb/printing.scm \
 	gdb/types.scm
 

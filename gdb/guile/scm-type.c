@@ -1,6 +1,6 @@
 /* Scheme interface to types.
 
-   Copyright (C) 2008-2013 Free Software Foundation, Inc.
+   Copyright (C) 2008-2014 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -63,13 +63,6 @@ typedef struct
 
   /* The field number in TYPE_SCM.  */
   int field_num;
-
-  /* The result of passing type_scm through *smob->scm*.
-     This is what we hand back to the user.
-     To simplify the code, this is computed lazily
-     (tyscm_scm_from_field_unsafe only has to worry about one source of
-     exceptions).  */
-  SCM converted_type_scm;
 } field_smob;
 
 static const char type_smob_name[] = "gdb:type";
@@ -88,7 +81,7 @@ static scm_t_bits field_smob_tag;
 static SCM tyscm_next_field_x_proc;
 
 /* Keywords used in argument passing.  */
-static SCM tyscm_block_keyword;
+static SCM block_keyword;
 
 static const struct objfile_data *tyscm_objfile_data_key;
 
@@ -311,17 +304,16 @@ gdbscm_type_p (SCM self)
   return scm_from_bool (tyscm_is_type (self));
 }
 
-/* Create a new <gdb:type> object that encapsulates TYPE.
-   The object is passed through *smob->scm*.
-   A Scheme exception is thrown if there is an error.  */
+/* Return the existing object that encapsulates TYPE, or create a new
+   <gdb:type> object.  */
 
 SCM
-tyscm_scm_from_type_unsafe (struct type *type)
+tyscm_scm_from_type (struct type *type)
 {
   htab_t htab;
   eqable_gdb_smob **slot;
   type_smob *t_smob, t_smob_for_lookup;
-  SCM t_scm, result;
+  SCM t_scm;
 
   /* If we've already created a gsmob for this type, return it.
      This makes types eq?-able.  */
@@ -334,44 +326,25 @@ tyscm_scm_from_type_unsafe (struct type *type)
   t_scm = tyscm_make_type_smob ();
   t_smob = (type_smob *) SCM_SMOB_DATA (t_scm);
   t_smob->type = type;
-  result = gdbscm_scm_from_gsmob_unsafe (t_scm);
-  gdbscm_fill_eqable_gsmob_ptr_slot (slot, &t_smob->base, result);
-
-  return result;
-}
-
-/* Returns the <gdb:type> object in SCM or #f if SCM is not a
-   <gdb:type> object.
-   Returns a <gdb:exception> object if there was a problem during the
-   conversion.  */
-
-static SCM
-tyscm_scm_to_type_gsmob (SCM scm)
-{
-  return gdbscm_scm_to_gsmob_safe (scm, type_smob_tag);
-}
-
-/* Returns the <gdb:type> object in SELF.
-   Throws an exception if SELF is not a <gdb:type> object
-   (after passing it through *scm->smob*).  */
-
-static SCM
-tyscm_get_type_arg_unsafe (SCM self, int arg_pos, const char *func_name)
-{
-  SCM t_scm = tyscm_scm_to_type_gsmob (self);
-
-  if (gdbscm_is_exception (t_scm))
-    gdbscm_throw (t_scm);
-
-  SCM_ASSERT_TYPE (tyscm_is_type (t_scm), self, arg_pos, func_name,
-		   type_smob_name);
+  gdbscm_fill_eqable_gsmob_ptr_slot (slot, &t_smob->base, t_scm);
 
   return t_scm;
 }
 
+/* Returns the <gdb:type> object in SELF.
+   Throws an exception if SELF is not a <gdb:type> object.  */
+
+static SCM
+tyscm_get_type_arg_unsafe (SCM self, int arg_pos, const char *func_name)
+{
+  SCM_ASSERT_TYPE (tyscm_is_type (self), self, arg_pos, func_name,
+		   type_smob_name);
+
+  return self;
+}
+
 /* Returns a pointer to the type smob of SELF.
-   Throws an exception if SELF is not a <gdb:type> object
-   (after passing it through *scm->smob*).  */
+   Throws an exception if SELF is not a <gdb:type> object.  */
 
 type_smob *
 tyscm_get_type_smob_arg_unsafe (SCM self, int arg_pos, const char *func_name)
@@ -491,55 +464,25 @@ gdbscm_field_p (SCM self)
    in type TYPE_SCM.  */
 
 SCM
-tyscm_gsmob_from_field (SCM type_scm, int field_num)
+tyscm_scm_from_field (SCM type_scm, int field_num)
 {
   return tyscm_make_field_smob (type_scm, field_num);
 }
 
-/* Create a new <gdb:field> object that encapsulates TYPE_SCM/FIELD_NUM.
-   The object is passed through *smob->scm*.
-   A Scheme exception is thrown if there is an error.  */
-
-SCM
-tyscm_scm_from_field_unsafe (SCM type_scm, int field_num)
-{
-  SCM f_scm = tyscm_gsmob_from_field (type_scm, field_num);
-
-  return gdbscm_scm_from_gsmob_unsafe (f_scm);
-}
-
-/* Returns the <gdb:field> object in SCM or #f if SCM is not a
-   <gdb:field> object.
-   Returns a <gdb:exception> object if there was a problem during the
-   conversion.  */
-
-static SCM
-tyscm_scm_to_field_gsmob (SCM scm)
-{
-  return gdbscm_scm_to_gsmob_safe (scm, field_smob_tag);
-}
-
 /* Returns the <gdb:field> object in SELF.
-   Throws an exception if SELF is not a <gdb:field> object
-   (after passing it through *scm->smob*).  */
+   Throws an exception if SELF is not a <gdb:field> object.  */
 
 static SCM
 tyscm_get_field_arg_unsafe (SCM self, int arg_pos, const char *func_name)
 {
-  SCM f_scm = tyscm_scm_to_field_gsmob (self);
-
-  if (gdbscm_is_exception (f_scm))
-    gdbscm_throw (f_scm);
-
-  SCM_ASSERT_TYPE (tyscm_is_field (f_scm), self, arg_pos, func_name,
+  SCM_ASSERT_TYPE (tyscm_is_field (self), self, arg_pos, func_name,
 		   field_smob_name);
 
-  return f_scm;
+  return self;
 }
 
 /* Returns a pointer to the field smob of SELF.
-   Throws an exception if SELF is not a <gdb:field> object
-   (after passing it through *scm->smob*).  */
+   Throws an exception if SELF is not a <gdb:field> object.  */
 
 static field_smob *
 tyscm_get_field_smob_arg_unsafe (SCM self, int arg_pos, const char *func_name)
@@ -617,7 +560,7 @@ gdbscm_type_fields (SCM self)
   if (containing_type == type)
     containing_type_scm = self;
   else
-    containing_type_scm = tyscm_scm_from_type_unsafe (containing_type);
+    containing_type_scm = tyscm_scm_from_type (containing_type);
 
   result = SCM_EOL;
   for (i = 0; i < TYPE_NFIELDS (containing_type); ++i)
@@ -678,7 +621,7 @@ gdbscm_type_strip_typedefs (SCM self)
     }
   GDBSCM_HANDLE_GDB_EXCEPTION (except);
 
-  return tyscm_scm_from_type_unsafe (type);
+  return tyscm_scm_from_type (type);
 }
 
 /* Strip typedefs and pointers/reference from a type.  Then check that
@@ -751,7 +694,7 @@ tyscm_array_1 (SCM self, SCM n1_scm, SCM n2_scm, int is_vector,
     }
   GDBSCM_HANDLE_GDB_EXCEPTION (except);
 
-  return tyscm_scm_from_type_unsafe (array);
+  return tyscm_scm_from_type (array);
 }
 
 /* (type-array <gdb:type> [low-bound] high-bound) -> <gdb:type>
@@ -803,7 +746,7 @@ gdbscm_type_pointer (SCM self)
     }
   GDBSCM_HANDLE_GDB_EXCEPTION (except);
 
-  return tyscm_scm_from_type_unsafe (type);
+  return tyscm_scm_from_type (type);
 }
 
 /* (type-range <gdb:type>) -> (low high)
@@ -862,7 +805,7 @@ gdbscm_type_reference (SCM self)
     }
   GDBSCM_HANDLE_GDB_EXCEPTION (except);
 
-  return tyscm_scm_from_type_unsafe (type);
+  return tyscm_scm_from_type (type);
 }
 
 /* (type-target <gdb:type>) -> <gdb:type>
@@ -877,7 +820,7 @@ gdbscm_type_target (SCM self)
 
   SCM_ASSERT (TYPE_TARGET_TYPE (type), self, SCM_ARG1, FUNC_NAME);
 
-  return tyscm_scm_from_type_unsafe (TYPE_TARGET_TYPE (type));
+  return tyscm_scm_from_type (TYPE_TARGET_TYPE (type));
 }
 
 /* (type-const <gdb:type>) -> <gdb:type>
@@ -897,7 +840,7 @@ gdbscm_type_const (SCM self)
     }
   GDBSCM_HANDLE_GDB_EXCEPTION (except);
 
-  return tyscm_scm_from_type_unsafe (type);
+  return tyscm_scm_from_type (type);
 }
 
 /* (type-volatile <gdb:type>) -> <gdb:type>
@@ -917,7 +860,7 @@ gdbscm_type_volatile (SCM self)
     }
   GDBSCM_HANDLE_GDB_EXCEPTION (except);
 
-  return tyscm_scm_from_type_unsafe (type);
+  return tyscm_scm_from_type (type);
 }
 
 /* (type-unqualified <gdb:type>) -> <gdb:type>
@@ -937,11 +880,12 @@ gdbscm_type_unqualified (SCM self)
     }
   GDBSCM_HANDLE_GDB_EXCEPTION (except);
 
-  return tyscm_scm_from_type_unsafe (type);
+  return tyscm_scm_from_type (type);
 }
 
 /* (type-name <gdb:type>) -> string
    Return the name of type.
+   FIXMExyzdje: check python, recent addition
    TODO: template support elided for now.  */
 
 static SCM
@@ -1095,7 +1039,7 @@ gdbscm_make_field_iterator (SCM self)
   if (containing_type == type)
     containing_type_scm = self;
   else
-    containing_type_scm = tyscm_scm_from_type_unsafe (containing_type);
+    containing_type_scm = tyscm_scm_from_type (containing_type);
 
   return gdbscm_make_iterator (containing_type_scm, scm_from_int (0),
 			       tyscm_next_field_x_proc);
@@ -1103,7 +1047,7 @@ gdbscm_make_field_iterator (SCM self)
 
 /* (type-next-field! <gdb:iterator>) -> <gdb:field>
    Return the next field in the iteration through the list of fields of the
-   type, or #f.
+   type, or (end-of-iteration).
    SELF is a <gdb:iterator> object created by gdbscm_make_field_iterator.
    This is the next! <gdb:iterator> function, not exported to the user.  */
 
@@ -1116,16 +1060,11 @@ gdbscm_type_next_field_x (SCM self)
   SCM it_scm, result, progress, object;
   int field, rc;
 
-  it_scm = itscm_scm_to_iterator_gsmob (self);
-  if (gdbscm_is_exception (it_scm))
-    gdbscm_throw (it_scm);
-  SCM_ASSERT_TYPE (itscm_is_iterator (it_scm), self, SCM_ARG1, FUNC_NAME,
-		   itscm_iterator_smob_name ());
+  it_scm = itscm_get_iterator_arg_unsafe (self, SCM_ARG1, FUNC_NAME);
   i_smob = (iterator_smob *) SCM_SMOB_DATA (it_scm);
   object = itscm_iterator_smob_object (i_smob);
   progress = itscm_iterator_smob_progress (i_smob);
 
-  /* TODO: pass object through *scm->smob*.  */
   SCM_ASSERT_TYPE (tyscm_is_type (object), object,
 		   SCM_ARG1, FUNC_NAME, type_smob_name);
   t_smob = (type_smob *) SCM_SMOB_DATA (object);
@@ -1143,7 +1082,7 @@ gdbscm_type_next_field_x (SCM self)
       return result;
     }
 
-  return SCM_BOOL_F;
+  return gdbscm_end_of_iteration ();
 }
 
 /* Field smob accessors.  */
@@ -1175,7 +1114,7 @@ gdbscm_field_type (SCM self)
 
   /* A field can have a NULL type in some situations.  */
   if (FIELD_TYPE (*field))
-    return tyscm_scm_from_type_unsafe (FIELD_TYPE (*field));
+    return tyscm_scm_from_type (FIELD_TYPE (*field));
   return SCM_BOOL_F;
 }
 
@@ -1289,7 +1228,7 @@ tyscm_lookup_typename (const char *type_name, const struct block *block)
 static SCM
 gdbscm_lookup_type (SCM name_scm, SCM rest)
 {
-  SCM keywords[] = { tyscm_block_keyword, SCM_BOOL_F };
+  SCM keywords[] = { block_keyword, SCM_BOOL_F };
   char *name;
   SCM block_scm = SCM_BOOL_F;
   int block_arg_pos = -1;
@@ -1316,7 +1255,7 @@ gdbscm_lookup_type (SCM name_scm, SCM rest)
   xfree (name);
 
   if (type != NULL)
-    return tyscm_scm_from_type_unsafe (type);
+    return tyscm_scm_from_type (type);
   return SCM_BOOL_F;
 }
 
@@ -1526,7 +1465,7 @@ gdbscm_initialize_types (void)
 				gdbscm_scm_from_c_string ("\
 Internal function to assist the type fields iterator."));
 
-  tyscm_block_keyword = scm_from_latin1_keyword ("block");
+  block_keyword = scm_from_latin1_keyword ("block");
 
   /* Register an objfile "free" callback so we can properly copy types
      associated with the objfile when it's about to be deleted.  */

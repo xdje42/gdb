@@ -1,4 +1,4 @@
-# Copyright (C) 2013 Free Software Foundation, Inc.
+# Copyright (C) 2014 Free Software Foundation, Inc.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -31,8 +31,8 @@ if ![gdb_guile_runto_main] {
     return
 }
 
-gdb_scm_test_silent_cmd "guile (use-modules (gdb types) (gdb experimental))" \
-    "import (gdb types) (gdb experimental)"
+gdb_scm_test_silent_cmd "guile (use-modules (gdb types))" \
+    "import (gdb types)"
 
 gdb_scm_test_silent_cmd "guile (define d (lookup-type \"derived\"))" \
     "get derived type"

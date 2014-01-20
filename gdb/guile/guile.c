@@ -1,6 +1,6 @@
 /* General GDB/Guile code.
 
-   Copyright (C) 2013 Free Software Foundation, Inc.
+   Copyright (C) 2014 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -146,10 +146,10 @@ static const struct extension_language_ops guile_extension_ops =
   NULL, /* gdbscm_set_quit_flag, */
 };
 
-/* Implementation of the gdb "guile-interactive" command.  */
+/* Implementation of the gdb "guile-repl" command.  */
 
 static void
-guile_interactive_command (char *arg, int from_tty)
+guile_repl_command (char *arg, int from_tty)
 {
   struct cleanup *cleanup;
 
@@ -165,7 +165,7 @@ guile_interactive_command (char *arg, int from_tty)
      sort it out, we forbid arguments.  */
 
   if (arg && *arg)
-    error (_("guile-interactive currently does not take any arguments."));
+    error (_("guile-repl currently does not take any arguments."));
   else
     {
       dont_repeat ();
@@ -379,15 +379,15 @@ gdbscm_target_config (void)
 
 #else /* ! HAVE_GUILE */
 
-/* Dummy implementation of the gdb "guile-interactive" and "guile"
+/* Dummy implementation of the gdb "guile-repl" and "guile"
    commands. */
 
 static void
-guile_interactive_command (char *arg, int from_tty)
+guile_repl_command (char *arg, int from_tty)
 {
   arg = skip_spaces (arg);
   if (arg && *arg)
-    error (_("guile-interactive currently does not take any arguments."));
+    error (_("guile-repl currently does not take any arguments."));
   error (_("Guile scripting is not supported in this copy of GDB."));
 }
 
@@ -526,7 +526,7 @@ initialize_gdb_module (void *data)
 {
   /* The documentation symbol needs to be defined before any calls to
      gdbscm_define_{variables,functions}.  */
-  gdbscm_documentation_symbol = gdbscm_symbol_from_c_string ("documentation");
+  gdbscm_documentation_symbol = scm_from_latin1_symbol ("documentation");
 
   /* The smob and exception support must be initialized early.  */
   gdbscm_initialize_smobs ();
@@ -601,22 +601,14 @@ gdbscm_set_backtrace (int enable)
 static void
 install_gdb_commands (void)
 {
-  add_com ("guile-interactive", class_obscure,
-	   guile_interactive_command,
+  add_com ("guile-repl", class_obscure,
+	   guile_repl_command,
 #ifdef HAVE_GUILE
 	   _("\
 Start an interactive Guile prompt.\n\
 \n\
 To return to GDB, type the EOF character (e.g., Ctrl-D on an empty\n\
-prompt).\n\
-\n\
-Alternatively, a single-line Guile command can be given as an\n\
-argument, and if the command is an expression, the result will be\n\
-printed.  For example:\n\
-\n\
-    (gdb) scheme-interactive (2 + 3)\n\
-    5\n\
-")
+prompt) or ,quit.")
 #else /* HAVE_GUILE */
 	   _("\
 Start a Guile interactive prompt.\n\
@@ -625,22 +617,24 @@ Guile scripting is not supported in this copy of GDB.\n\
 This command is only a placeholder.")
 #endif /* HAVE_GUILE */
 	   );
-  add_com_alias ("gi", "guile-interactive", class_obscure, 1);
+  add_com_alias ("gr", "guile-repl", class_obscure, 1);
 
   /* Since "help guile" is easy to type, and intuitive, we add general help
      in using GDB+Guile to this command.  */
   add_com ("guile", class_obscure, guile_command,
 #ifdef HAVE_GUILE
 	   _("\
-Evaluate a Guile command.\n\
+Evaluate one or more Guile expressions.\n\
 \n\
-The command can be given as an argument, for instance:\n\
+The expression(s) can be given as an argument, for instance:\n\
 \n\
     guile (display 23)\n\
 \n\
-If no argument is given, the following lines are read and used\n\
-as the Guile commands.  Type a line containing \"end\" to indicate\n\
-the end of the command.\n\
+The result of evaluating the last expression is printed.\n\
+\n\
+If no argument is given, the following lines are read and passed\n\
+to Guile for evaluation.  Type a line containing \"end\" to indicate\n\
+the end of the set of expressions.\n\
 \n\
 The Guile GDB module must first be imported before it can be used.\n\
 Do this with:\n\
@@ -648,12 +642,12 @@ Do this with:\n\
 or if you want to import the (gdb) module with a prefix, use:\n\
 (gdb) guile (use-modules ((gdb) #:renamer (symbol-prefix-proc 'gdb:)))\n\
 \n\
-The Guile interactive session, started with the \"guile-interactive\"\n\
+The Guile interactive session, started with the \"guile-repl\"\n\
 command, provides extensive help and apropos capabilities.\n\
 Type \",help\" once in a Guile interactive session.")
 #else /* HAVE_GUILE */
 	   _("\
-Evaluate a Guile command.\n\
+Evaluate a Guile expression.\n\
 \n\
 Guile scripting is not supported in this copy of GDB.\n\
 This command is only a placeholder.")

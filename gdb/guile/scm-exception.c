@@ -1,6 +1,6 @@
 /* GDB/Scheme exception support.
 
-   Copyright (C) 2013 Free Software Foundation, Inc.
+   Copyright (C) 2014 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -23,18 +23,13 @@
 /* Notes:
 
    IWBN to support SRFI 34/35.  At the moment we follow Guile's own
-   exception mechanism.  Hopefully we can support SRFI 34,35 the same way
-   we support GOOPS: via *smob->scm* and *scm->smob*.
-
-   For simplicity's sake the <gdb:exception> object is not currently
-   extendable.  They are not passed through *smob->scm* and *scm->smob*.
-   It simplifies the implementation, and we have to wait to see if/how
-   SRFI 34/35 support will look.
+   exception mechanism.
 
    The non-static functions in this file have prefix gdbscm_ and
    not exscm_ on purpose.  */
 
 #include "defs.h"
+#include <signal.h>
 #include "gdb_assert.h"
 #include "guile-internal.h"
 
@@ -58,18 +53,47 @@ static const char exception_smob_name[] = "gdb:exception";
 /* The tag Guile knows the exception smob by.  */
 static scm_t_bits exception_smob_tag;
 
-static SCM exscm_error_symbol;
-static SCM exscm_memory_error_symbol;
-static SCM exscm_signal_symbol;
-static SCM exscm_with_stack_error_symbol;
+/* A generic error in struct gdb_exception.
+   I.e., not RETURN_QUIT and not MEMORY_ERROR.  */
+static SCM error_symbol;
+
+/* An error occurred accessing inferior memory.
+   This is not a Scheme programming error.  */
+static SCM memory_error_symbol;
+
+/* User interrupt, e.g., RETURN_QUIT in struct gdb_exception.  */
+static SCM signal_symbol;
+
+/* Printing the stack is done by first capturing the stack and recording it in
+   a <gdb:exception> object with this key and with the ARGS field set to
+   (cons real-key (cons stack real-args)).
+   See gdbscm_make_exception_with_stack.  */
+static SCM with_stack_error_symbol;
+
+/* The key to use for an invalid object exception.  An invalid object is one
+   where the underlying object has been removed from GDB.  */
 SCM gdbscm_invalid_object_error_symbol;
 
-static const char percent_print_exception_name[] = "%print-exception";
+/* Values for "guile print-stack" as symbols.  */
+static SCM none_symbol;
+static SCM message_symbol;
+static SCM full_symbol;
 
-/* Variable containing our exception printer (%print-exception).
+static const char percent_print_exception_message_name[] =
+  "%print-exception-message";
+
+/* Variable containing %print-exception-message.
    It is not defined until late in initialization, after our init routine
    has run.  Cope by looking it up lazily.  */
-static SCM percent_print_exception_var = SCM_BOOL_F;
+static SCM percent_print_exception_message_var = SCM_BOOL_F;
+
+static const char percent_print_exception_with_stack_name[] =
+  "%print-exception-with-stack";
+
+/* Variable containing %print-exception-with-stack.
+   It is not defined until late in initialization, after our init routine
+   has run.  Cope by looking it up lazily.  */
+static SCM percent_print_exception_with_stack_var = SCM_BOOL_F;
 
 /* Counter to keep track of the number of times we create a <gdb:exception>
    object, for performance monitoring purposes.  */
@@ -173,12 +197,12 @@ gdbscm_exception_args (SCM self)
 }
 
 /* Wrap an exception in a <gdb:exception> object that includes STACK.
-   gdbscm_print_exception_with_args knows how to unwrap it.  */
+   gdbscm_print_exception_with_stack knows how to unwrap it.  */
 
 SCM
 gdbscm_make_exception_with_stack (SCM key, SCM args, SCM stack)
 {
-  return gdbscm_make_exception (exscm_with_stack_error_symbol,
+  return gdbscm_make_exception (with_stack_error_symbol,
 				scm_cons (key, scm_cons (stack, args)));
 }
 
@@ -357,7 +381,7 @@ gdbscm_make_misc_error (const char *subr, int arg_pos, SCM bad_value,
 SCM
 gdbscm_make_memory_error (const char *subr, const char *msg, SCM args)
 {
-  return gdbscm_make_error (exscm_memory_error_symbol, subr, msg, args,
+  return gdbscm_make_error (memory_error_symbol, subr, msg, args,
 			    SCM_EOL);
 }
 
@@ -371,12 +395,13 @@ gdbscm_memory_error (const char *subr, const char *msg, SCM args)
   gdbscm_throw (exception);
 }
 
-/* Return non-zero if KEY is a memory error.  */
+/* Return non-zero if KEY is gdb:memory-error.
+   Note: This is an excp_matcher_func function.  */
 
 int
 gdbscm_memory_error_p (SCM key)
 {
-  return scm_is_eq (key, exscm_memory_error_symbol);
+  return scm_is_eq (key, memory_error_symbol);
 }
 
 /* Wrapper around scm_throw to throw a gdb:exception.
@@ -401,14 +426,14 @@ gdbscm_scm_from_gdb_exception (struct gdb_exception exception)
   if (exception.reason == RETURN_QUIT)
     {
       /* Handle this specially to be consistent with top-repl.scm.  */
-      return gdbscm_make_error (exscm_signal_symbol, NULL, _("User interrupt"),
+      return gdbscm_make_error (signal_symbol, NULL, _("User interrupt"),
 				SCM_EOL, scm_list_1 (scm_from_int (SIGINT)));
     }
 
   if (exception.error == MEMORY_ERROR)
-    key = exscm_memory_error_symbol;
+    key = memory_error_symbol;
   else
-    key = exscm_error_symbol;
+    key = error_symbol;
 
   return gdbscm_make_error (key, NULL, "~A",
 			    scm_list_1 (gdbscm_scm_from_c_string
@@ -427,38 +452,52 @@ gdbscm_throw_gdb_exception (struct gdb_exception exception)
 
 /* Print the error message portion of an exception.
    If PORT is #f, use the standard error port.
+   KEY cannot be gdb:with-stack.
 
-   We assume the error printing machinery is robust enough to catch its
-   own errors and still print something sensible.  */
+   Basically this function is just a wrapper around calling
+   %print-exception-message.  */
 
-void
+static void
 gdbscm_print_exception_message (SCM port, SCM frame, SCM key, SCM args)
 {
-  SCM printer;
+  SCM printer, status;
 
   if (gdbscm_is_false (port))
     port = scm_current_error_port ();
 
-  /* Another way to do this might be with scm_display_error or
-     scm_print_exception.  */
-  if (gdbscm_is_false (percent_print_exception_var))
+  gdb_assert (!scm_is_eq (key, with_stack_error_symbol));
+
+  /* This does not use scm_print_exception because we tweak the output a bit.
+     Compare Guile's print-exception with our %print-exception-message for
+     details.  */
+  if (gdbscm_is_false (percent_print_exception_message_var))
     {
-      percent_print_exception_var
+      percent_print_exception_message_var
 	= scm_c_private_variable (gdbscm_init_module_name,
-				  percent_print_exception_name);
-      /* If we can't find %print-exception, there's a problem on the Scheme
-	 side.  Don't kill GDB, just flag an error and leave it at that.  */
-      if (gdbscm_is_false (percent_print_exception_var))
+				  percent_print_exception_message_name);
+      /* If we can't find %print-exception-message, there's a problem on the
+	 Scheme side.  Don't kill GDB, just flag an error and leave it at
+	 that.  */
+      if (gdbscm_is_false (percent_print_exception_message_var))
 	{
 	  gdbscm_printf (port, _("Error in Scheme exception printing,"
 				 " can't find %s.\n"),
-			 percent_print_exception_name);
+			 percent_print_exception_message_name);
 	  return;
 	}
     }
-  printer = scm_variable_ref (percent_print_exception_var);
+  printer = scm_variable_ref (percent_print_exception_message_var);
 
-  gdbscm_safe_call_4 (printer, port, frame, key, args, NULL);
+  status = gdbscm_safe_call_4 (printer, port, frame, key, args, NULL);
+
+  /* If that failed still tell the user something.
+     But don't use the exception printing machinery!  */
+  if (gdbscm_is_exception (status))
+    {
+      gdbscm_printf (port, _("Error in Scheme exception printing:\n"));
+      scm_display (status, port);
+      scm_newline (port);
+    }
 }
 
 /* Print the description of exception KEY, ARGS to PORT, according to the
@@ -467,79 +506,67 @@ gdbscm_print_exception_message (SCM port, SCM frame, SCM key, SCM args)
    If STACK is #f, never print the stack, regardless of whether printing it
    is enabled.  If STACK is #t, then print it if it is contained in ARGS
    (i.e., KEY is gdb:with-stack).  Otherwise STACK is the result of calling
-   scm_make_stack.
+   scm_make_stack (which will be ignored in favor of the stack in ARGS if
+   KEY is gdb:with-stack).
    KEY, ARGS are the standard arguments to scm_throw, et.al.
 
-   We assume the error printing machinery is robust enough to catch its
-   own errors and still print something sensible.  */
+   Basically this function is just a wrapper around calling
+   %print-exception-with-args.  */
 
 void
-gdbscm_print_exception_with_args (SCM port, SCM stack, SCM key, SCM args)
+gdbscm_print_exception_with_stack (SCM port, SCM stack, SCM key, SCM args)
 {
-  SCM frame;
-  SCM error_port = scm_current_error_port ();
-
-  if (gdbscm_print_excp == gdbscm_print_excp_none)
-    return;
+  SCM printer, status;
 
   if (gdbscm_is_false (port))
-    port = error_port;
+    port = scm_current_error_port ();
 
-  if (scm_is_eq (port, error_port))
+  if (gdbscm_is_false (percent_print_exception_with_stack_var))
     {
-      scm_force_output (scm_current_output_port ());
-      gdb_flush (gdb_stdout);
+      percent_print_exception_with_stack_var
+	= scm_c_private_variable (gdbscm_init_module_name,
+				  percent_print_exception_with_stack_name);
+      /* If we can't find %print-exception-with-args, there's a problem on the
+	 Scheme side.  Don't kill GDB, just flag an error and leave it at
+	 that.  */
+      if (gdbscm_is_false (percent_print_exception_with_stack_var))
+	{
+	  gdbscm_printf (port, _("Error in Scheme exception printing,"
+				 " can't find %s.\n"),
+			 percent_print_exception_with_stack_name);
+	  return;
+	}
     }
+  printer = scm_variable_ref (percent_print_exception_with_stack_var);
 
-  /* If printing the stack hasn't been disabled by the caller, and the
-     exception is gdb:with-stack, unwrap it to get the stack and underlying
-     exception.  If the caller happens to pass in a stack, we ignore it and
-     use the one in ARGS instead.  */
-  frame = SCM_BOOL_F;
-  if (!gdbscm_is_false (stack)
-      && scm_is_eq (key, exscm_with_stack_error_symbol))
-    {
-      gdb_assert (scm_ilength (args) >= 2);
-      key = scm_car (args);
-      stack = scm_cadr (args);
-      args = scm_cddr (args);
-      frame = scm_stack_ref (stack, SCM_INUM0);
-    }
-  else if (scm_is_eq (stack, SCM_BOOL_T))
-    {
-      /* The caller wanted a stack, but there isn't one.  */
-      stack = SCM_BOOL_F;
-    }
+  status = gdbscm_safe_call_4 (printer, port, stack, key, args, NULL);
 
-  if (gdbscm_print_excp == gdbscm_print_excp_full
-      && gdbscm_is_true (stack))
+  /* If that failed still tell the user something.
+     But don't use the exception printing machinery!  */
+  if (gdbscm_is_exception (status))
     {
-      /* This is borrowed from libguile/throw.c:handler_message.  */
-      scm_puts ("Backtrace:\n", port);
-      scm_display_backtrace_with_highlights (stack, port,
-                                             SCM_BOOL_F, SCM_BOOL_F,
-                                             SCM_EOL);
+      gdbscm_printf (port, _("Error in Scheme exception printing:\n"));
+      scm_display (status, port);
       scm_newline (port);
     }
-
-  gdbscm_print_exception_message (port, frame, key, args);
 }
 
 /* Print EXCEPTION, a <gdb:exception> object, to PORT.
    If PORT is #f, use the standard error port.  */
 
 void
-gdbscm_print_exception (SCM port, SCM exception)
+gdbscm_print_gdb_exception (SCM port, SCM exception)
 {
   gdb_assert (gdbscm_is_exception (exception));
 
-  gdbscm_print_exception_with_args (port, SCM_BOOL_T,
-				    gdbscm_exception_key (exception),
-				    gdbscm_exception_args (exception));
+  gdbscm_print_exception_with_stack (port, SCM_BOOL_T,
+				     gdbscm_exception_key (exception),
+				     gdbscm_exception_args (exception));
 }
 
 /* Return a string description of <gdb:exception> EXCEPTION.
-   STACK is the STACK arg to gdbscm_print_exception_with_args.
+   If EXCEPTION is a gdb:with-stack exception, unwrap it, a backtrace
+   is never returned as part of the result.
 
    Space for the result is malloc'd, the caller must free.  */
 
@@ -555,6 +582,15 @@ gdbscm_exception_message_to_string (SCM exception)
   key = gdbscm_exception_key (exception);
   args = gdbscm_exception_args (exception);
 
+  if (scm_is_eq (key, with_stack_error_symbol)
+      /* Don't crash on a badly generated gdb:with-stack exception.  */
+      && scm_is_pair (args)
+      && scm_is_pair (scm_cdr (args)))
+    {
+      key = scm_car (args);
+      args = scm_cddr (args);
+    }
+
   gdbscm_print_exception_message (port, SCM_BOOL_F, key, args);
   result = gdbscm_scm_to_c_string (scm_get_output_string (port));
   scm_close_port (port);
@@ -562,7 +598,23 @@ gdbscm_exception_message_to_string (SCM exception)
   return result;
 }
 
-/* Return the current <gdb:exception> counter.  */
+/* Return the value of the "guile print-stack" option as one of:
+   'none, 'message, 'full.  */
+
+static SCM
+gdbscm_percent_exception_print_style (void)
+{
+  if (gdbscm_print_excp == gdbscm_print_excp_none)
+    return none_symbol;
+  if (gdbscm_print_excp == gdbscm_print_excp_message)
+    return message_symbol;
+  if (gdbscm_print_excp == gdbscm_print_excp_full)
+    return full_symbol;
+  gdb_assert_not_reached ("bad value for \"guile print-stack\"");
+}
+
+/* Return the current <gdb:exception> counter.
+   This is for debugging purposes.  */
 
 static SCM
 gdbscm_percent_exception_count (void)
@@ -598,6 +650,10 @@ Return the exception's arg list." },
 
 static const scheme_function private_exception_functions[] =
 {
+  { "%exception-print-style", 0, 0, 0, gdbscm_percent_exception_print_style,
+    "\
+Return the value of the \"guile print-stack\" option." },
+
   { "%exception-count", 0, 0, 0, gdbscm_percent_exception_count,
     "\
 Return a count of the number of <gdb:exception> objects created.\n\
@@ -617,16 +673,19 @@ gdbscm_initialize_exceptions (void)
   gdbscm_define_functions (exception_functions, 1);
   gdbscm_define_functions (private_exception_functions, 0);
 
-  exscm_error_symbol = gdbscm_symbol_from_c_string ("gdb:error");
+  error_symbol = scm_from_latin1_symbol ("gdb:error");
 
-  exscm_memory_error_symbol = gdbscm_symbol_from_c_string ("gdb:memory-error");
+  memory_error_symbol = scm_from_latin1_symbol ("gdb:memory-error");
 
   gdbscm_invalid_object_error_symbol
-    = gdbscm_symbol_from_c_string ("gdb:invalid-object-error");
+    = scm_from_latin1_symbol ("gdb:invalid-object-error");
 
-  exscm_with_stack_error_symbol
-    = gdbscm_symbol_from_c_string ("gdb:with-stack");
+  with_stack_error_symbol = scm_from_latin1_symbol ("gdb:with-stack");
 
   /* The text of this symbol is taken from Guile's top-repl.scm.  */
-  exscm_signal_symbol = gdbscm_symbol_from_c_string ("signal");
+  signal_symbol = scm_from_latin1_symbol ("signal");
+
+  none_symbol = scm_from_latin1_symbol ("none");
+  message_symbol = scm_from_latin1_symbol ("message");
+  full_symbol = scm_from_latin1_symbol ("full");
 }

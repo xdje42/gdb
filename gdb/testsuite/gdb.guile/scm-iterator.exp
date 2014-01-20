@@ -1,4 +1,4 @@
-# Copyright (C) 2013 Free Software Foundation, Inc.
+# Copyright (C) 2014 Free Software Foundation, Inc.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -14,7 +14,7 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 # This file is part of the GDB testsuite.
-# It tests the experimental iterator facility.
+# It tests the iterator facility.
 
 load_lib gdb-guile.exp
 
@@ -34,8 +34,8 @@ if ![gdb_guile_runto_main] {
 gdb_breakpoint [gdb_get_line_number "Break at end."]
 gdb_continue_to_breakpoint "Break at end."
 
-gdb_scm_test_silent_cmd "guile (use-modules (gdb experimental))" \
-    "import (gdb experimental)"
+gdb_scm_test_silent_cmd "guile (use-modules (gdb iterator))" \
+    "import (gdb iterator)"
 
 gdb_scm_test_silent_cmd "guile (define this-sal (find-pc-line (frame-pc (selected-frame))))" \
     "get frame sal"
@@ -49,7 +49,7 @@ gdb_scm_test_silent_cmd "guile (define this-global-block (symtab-global-block th
 gdb_scm_test_silent_cmd "guile (define syms-iter (make-block-symbols-iterator this-global-block))" \
     "get global block iterator"
 
-gdb_scm_test_silent_cmd "guile (define functions (iterator-filter symbol-function? syms-iter #f))" \
+gdb_scm_test_silent_cmd "guile (define functions (iterator-filter symbol-function? syms-iter))" \
     "get global functions"
 
 gdb_test "guile (print (sort (map symbol-name functions) string<?))" \

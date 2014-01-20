@@ -1,6 +1,6 @@
 /* Simple iterators for GDB/Scheme.
 
-   Copyright (C) 2013 Free Software Foundation, Inc.
+   Copyright (C) 2014 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -80,6 +80,9 @@ static const char iterator_smob_name[] = "gdb:iterator";
 
 /* The tag Guile knows the iterator smob by.  */
 static scm_t_bits iterator_smob_tag;
+
+/* A unique-enough marker to denote "end of iteration".  */
+static SCM end_of_iteration;
 
 const char *
 itscm_iterator_smob_name (void)
@@ -174,7 +177,7 @@ gdbscm_make_iterator (SCM object, SCM progress, SCM next)
 
   i_scm = itscm_make_iterator_smob (object, progress, next);
 
-  return gdbscm_scm_from_gsmob_unsafe (i_scm);
+  return i_scm;
 }
 
 /* Return non-zero if SCM is a <gdb:iterator> object.  */
@@ -193,15 +196,29 @@ gdbscm_iterator_p (SCM scm)
   return scm_from_bool (itscm_is_iterator (scm));
 }
 
-/* Returns the <gdb:iterator> object contained in SCM or #f if SCM is not a
-   <gdb:iterator> object.
-   Returns a <gdb:exception> object if there was a problem during the
-   conversion.  */
+/* (end-of-iteration) -> an "end-of-iteration" marker
+   We rely on this not being used as a data result of an iterator.  */
 
 SCM
-itscm_scm_to_iterator_gsmob (SCM scm)
+gdbscm_end_of_iteration (void)
 {
-  return gdbscm_scm_to_gsmob_safe (scm, iterator_smob_tag);
+  return end_of_iteration;
+}
+
+/* Return non-zero if OBJ is the end-of-iteration marker.  */
+
+int
+itscm_is_end_of_iteration (SCM obj)
+{
+  return scm_is_eq (obj, end_of_iteration);
+}
+
+/* (end-of-iteration? obj) -> boolean */
+
+static SCM
+gdbscm_end_of_iteration_p (SCM obj)
+{
+  return scm_from_bool (itscm_is_end_of_iteration (obj));
 }
 
 /* Call the next! method on ITER, which must be a <gdb:iterator> object.
@@ -222,21 +239,15 @@ itscm_safe_call_next_x (SCM iter, excp_matcher_func *ok_excps)
 /* Iterator methods.  */
 
 /* Returns the <gdb:iterator> smob in SELF.
-   Throws an exception if SELF is not an iterator smob
-   (after passing it through *scm->smob*).  */
+   Throws an exception if SELF is not an iterator smob.  */
 
 SCM
 itscm_get_iterator_arg_unsafe (SCM self, int arg_pos, const char *func_name)
 {
-  SCM i_scm = itscm_scm_to_iterator_gsmob (self);
-
-  if (gdbscm_is_exception (i_scm))
-    gdbscm_throw (i_scm);
-
-  SCM_ASSERT_TYPE (itscm_is_iterator (i_scm), self, arg_pos, func_name,
+  SCM_ASSERT_TYPE (itscm_is_iterator (self), self, arg_pos, func_name,
 		   iterator_smob_name);
 
-  return i_scm;
+  return self;
 }
 
 /* (iterator-object <gdb:iterator>) -> object */
@@ -313,7 +324,9 @@ Create a <gdb:iterator> object.\n\
     progress: An object to use to track progress of the iteration.\n\
     next!:    A procedure of one argument, the iterator.\n\
       Returns the next element in the iteration or an implementation-chosen\n\
-      value to signify iteration is complete." },
+      value to signify iteration is complete.\n\
+      By convention end-of-iteration should be marked with (end-of-iteration)\n\
+      from module (gdb iterator)." },
 
   { "iterator?", 1, 0, 0, gdbscm_iterator_p,
     "\
@@ -335,6 +348,14 @@ Set the progress object of the iterator." },
     "\
 Invoke the next! procedure of the iterator and return its result." },
 
+  { "end-of-iteration", 0, 0, 0, gdbscm_end_of_iteration,
+    "\
+Return the end-of-iteration marker." },
+
+  { "end-of-iteration?", 1, 0, 0, gdbscm_end_of_iteration_p,
+    "\
+Return #t if the object is the end-of-iteration marker." },
+
   END_FUNCTIONS
 };
 
@@ -347,4 +368,8 @@ gdbscm_initialize_iterators (void)
   scm_set_smob_print (iterator_smob_tag, itscm_print_iterator_smob);
 
   gdbscm_define_functions (iterator_functions, 1);
+
+  /* We can make this more unique if it's necessary,
+     but this is good enough for now.  */
+  end_of_iteration = scm_from_latin1_keyword ("end-of-iteration");
 }

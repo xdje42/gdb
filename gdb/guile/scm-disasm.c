@@ -1,6 +1,6 @@
 /* Scheme interface to architecture.
 
-   Copyright (C) 2013 Free Software Foundation, Inc.
+   Copyright (C) 2014 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -73,7 +73,8 @@ dascm_make_insn (CORE_ADDR pc, const char *assembly, int insn_len)
 }
 
 /* Helper function for gdbscm_disasm_read_memory to safely read from a
-   Scheme port.  Called via gdbscm_call_guile.  */
+   Scheme port.  Called via gdbscm_call_guile.
+   The result is a statically allocated error message or NULL if success.  */
 
 static void *
 gdbscm_disasm_read_memory_worker (void *datap)
@@ -348,7 +349,7 @@ gdbscm_initialize_disasm (void)
   size_keyword = scm_from_latin1_keyword ("size");
   count_keyword = scm_from_latin1_keyword ("count");
 
-  address_symbol = gdbscm_symbol_from_c_string ("address");
-  asm_symbol = gdbscm_symbol_from_c_string ("asm");
-  length_symbol = gdbscm_symbol_from_c_string ("length");
+  address_symbol = scm_from_latin1_symbol ("address");
+  asm_symbol = scm_from_latin1_symbol ("asm");
+  length_symbol = scm_from_latin1_symbol ("length");
 }

@@ -10,11 +10,8 @@ Nomenclature:
   And sometimes it doesn't matter.
   Guile is Scheme, and for the most part this is what we present to the user
   as well.  However, to highlight the fact that it is Guile, the GDB commands
-  that invoke Scheme functions are named "guile" and "guile-interactive",
-  abbreviated "gu" and "gi" respectively.
-  I thought of "guile-repl" instead of "guile-interactive" but for consistency
-  with the Python side I picked guile-interactive.  I like "guile-repl"
-  more though.
+  that invoke Scheme functions are named "guile" and "guile-repl",
+  abbreviated "gu" and "gr" respectively.
 
 Co-existence with Python:
 
@@ -43,7 +40,7 @@ Implementation/Hacking notes:
   Don't use scm_is_false.
   For this C function, () == #f (a la Lisp) and it's not clear how treating
   them as equivalent for truth values will affect the GDB interface.
-  Until the affect is clear avoid them.
+  Until the effect is clear avoid them.
   Instead use gdbscm_is_false, gdbscm_is_true, gdbscm_is_bool.
   There are macros in guile-internal.h to enforce this.
 
@@ -90,7 +87,8 @@ General naming rules:
     Scheme object (of any type), and is never used otherwise.
     If you want to refer to, e.g., a GOOPS object, say "GOOPS object".
 
-  - Do not begin any function,variable,etc. name with scm_
+  - Do not begin any function, global variable, etc. name with scm_.
+    That's what the Guile implementation uses.
     (kinda obvious, just being complete).
 
   - The word "invalid" carries a specific connotation.  Try not to use it
@@ -124,6 +122,9 @@ Smob naming:
   - smob names are stored in a global, and for simplicity we pass this
     global as the "expected type" parameter to SCM_ASSERT_TYPE, thus in
     this instance smob types are printed without the <>.
+    [Hmmm, this rule seems dated now.  Plus I18N rules in GDB are not always
+    clear, sometimes we pass the smob name through _(), however it's not
+    clear that's actually a good idea.]
 
 Type naming:
 
@@ -146,9 +147,10 @@ Function naming:
   General:
 
   - all non-static functions have a prefix,
-    either gdbscm_ or <char><char>scm_
+    either gdbscm_ or <char><char>scm_ [or <char><char><char>scm_]
 
-  - all functions that implement Scheme procedures have a gdbscm_ prefix
+  - all functions that implement Scheme procedures have a gdbscm_ prefix,
+    this is for consistency and readability of Scheme exception text
 
   - static functions typically have a prefix
     - the prefix is typically <char><char>scm_ where the first two letters
@@ -158,7 +160,7 @@ Function naming:
       we make it formal.
 
   - if the function is of a general nature, or no other prefix works,
-     use gdbscm_
+    use gdbscm_
 
   Conversion functions:
 
@@ -166,15 +168,6 @@ Function naming:
   - conversions from/to Scheme objects are named:
       prefix_scm_from_foo: converts from foo to scm
       prefix_scm_to_foo: converts from scm to foo
-  - conversion functions from/to gdb smobs and C types:
-     prefix_gsmob_from_foo: converts from foo to gsmob
-     prefix_gsmob_to_foo: converts from gsmob to foo
-  - conversion functions from a Scheme object to its gdb smob Scheme object
-    (i.e., it may be passed through *scm->smob*): ${prefix}_scm_to_foo_gsmob,
-    possibly with _unsafe added
-  - conversion functions to a Scheme object from its gdb smob Scheme object
-    (i.e., it is passed through *smob->scm*): ${prefix}_scm_from_foo_gsmob,
-    possibly with _unsafe added
 
   Exception handling:
 
@@ -187,7 +180,8 @@ Function naming:
   - "_safe" in a function name means it will never throw an exception
     - Generally unnecessary, since the convention is to mark the ones that
       *can* throw an exception.  But sometimes it's useful to highlight the
-      fact that the function is safe to call.
+      fact that the function is safe to call without worrying about exception
+      handling.
 
   - except for functions that implement Scheme procedures, all functions
     that can throw exceptions (GDB or Scheme) say so in their function comment
@@ -201,7 +195,7 @@ Function naming:
 
   Internal functions:
 
-  - internal functions begin with "%" and are intentionally undocumented
+  - internal Scheme functions begin with "%" and are intentionally undocumented
     in the manual
 
   Standard Guile/Scheme conventions:
@@ -217,7 +211,8 @@ Function naming:
 
 Doc strings:
 
-  - there are lots of existing examples, they should be pretty consistent
+  - there are lots of existing examples, they should be pretty consistent,
+    use them as boilerplate/examples
   - begin with a one line summary (can be multiple lines if necessary)
   - if the arguments need description:
     - blank line

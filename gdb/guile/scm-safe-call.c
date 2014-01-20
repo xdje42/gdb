@@ -1,6 +1,6 @@
 /* GDB/Scheme support for safe calls into the Guile interpreter.
 
-   Copyright (C) 2013 Free Software Foundation, Inc.
+   Copyright (C) 2014 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -44,7 +44,7 @@ struct with_catch_data
   scm_t_catch_handler unwind_handler;
   scm_t_catch_handler pre_unwind_handler;
 
-  /* If EXCP_MATHER is non-NULL, it is an excp_matcher_func function.
+  /* If EXCP_MATCHER is non-NULL, it is an excp_matcher_func function.
      If the exception is recognized by it, the exception is recorded as is,
      without wrapping it in gdb:with-stack.  */
   excp_matcher_func *excp_matcher;
@@ -74,7 +74,7 @@ scscm_printing_pre_unwind_handler (void *data, SCM key, SCM args)
 {
   SCM stack = scm_make_stack (SCM_BOOL_T, scm_list_1 (scm_from_int (2)));
 
-  gdbscm_print_exception_with_args (SCM_BOOL_F, stack, key, args);
+  gdbscm_print_exception_with_stack (SCM_BOOL_F, stack, key, args);
 
   return SCM_UNSPECIFIED;
 }
@@ -160,7 +160,9 @@ gdbscm_with_catch (void *data)
 }
 
 /* A wrapper around scm_with_guile that prints backtraces and exceptions
-   according to "set guile print-stack".  */
+   according to "set guile print-stack".
+   The result if NULL if no exception occurred, otherwise it is a statically
+   allocated error message (caller must *not* free).  */
 
 void *
 gdbscm_with_guile (void *(*func) (void *), void *data)
@@ -456,7 +458,7 @@ void
 gdbscm_enter_repl (void)
 {
   /* It's unfortunate to have to resort to something like this, but
-     scm_shell doesn't return.  :-(  I found this code on guile-users@.  */
+     scm_shell doesn't return.  :-(  I found this code on guile-user@.  */
   gdbscm_safe_call_1 (scm_c_public_ref ("system repl repl", "start-repl"),
 		      scm_from_latin1_symbol ("scheme"), NULL);
 }

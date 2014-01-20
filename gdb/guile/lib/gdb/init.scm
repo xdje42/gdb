@@ -1,6 +1,6 @@
 ;; Scheme side of the gdb module.
 ;;
-;; Copyright (C) 2013 Free Software Foundation, Inc.
+;; Copyright (C) 2014 Free Software Foundation, Inc.
 ;;
 ;; This file is part of GDB.
 ;;
@@ -28,6 +28,9 @@
 (define %orig-output-port #f)
 (define %orig-error-port #f)
 
+;; %exception-print-style is exported as "private" by gdb.
+(define %exception-print-style (@@ (gdb) %exception-print-style))
+
 ;; Keys for GDB-generated exceptions.
 ;; gdb:with-stack is handled separately.
 
@@ -38,7 +41,7 @@
 
 ;; Printer for gdb exceptions, used when Scheme tries to print them directly.
 
-(define (%error-printer port key args default-printer)
+(define (%exception-printer port key args default-printer)
   (apply (case-lambda
 	  ((subr msg args . rest)
 	   (if subr
@@ -48,57 +51,95 @@
 	 args))
 
 ;; Print the message part of a gdb:with-stack exception.
-;; The arg list is the way it is because it's also passed to
-;; set-exception-printer!.
-;; We don't print a backtrace here because when invoked by Guile it will have
-;; already printed a backtrace.
+;; The arg list is the way it is because it's passed to set-exception-printer!.
+;; We don't print a backtrace here because Guile will have already printed a
+;; backtrace.
 
-(define (%print-with-stack-exception-message port key args default-printer)
+(define (%with-stack-exception-printer port key args default-printer)
   (let ((real-key (car args))
 	(real-args (cddr args)))
-    (%error-printer port real-key real-args default-printer)))
+    (%exception-printer port real-key real-args default-printer)))
 
 ;; Copy of Guile's print-exception that tweaks the output for our purposes.
+;; TODO: It's not clear the tweaking is still necessary.
 
-(define (%print-exception-worker port frame key args)
+(define (%print-exception-message-worker port key args)
   (define (default-printer)
     (format port "Throw to key `~a' with args `~s'." key args))
   (format port "ERROR: ")
   ;; Pass #t for tag to catch all errors.
   (catch #t
 	 (lambda ()
-	   (%error-printer port key args default-printer))
+	   (%exception-printer port key args default-printer))
 	 (lambda (k . args)
 	   (format port "Error while printing gdb exception: ~a ~s."
 		   k args)))
   (newline port)
   (force-output port))
 
-;; Print a gdb:with-stack exception, including the backtrace.
-;; This is a special exception that wraps the real exception and includes
-;; the stack.  It is used to record the stack at the point of the exception,
-;; but defer printing it until now.
-
-(define (%print-with-stack-exception port key args)
-  (let ((real-key (car args))
-	(stack (cadr args))
-	(real-args (cddr args)))
-    (display "Backtrace:\n" port)
-    (display-backtrace stack port #f #f '())
-    (newline port)
-    (%print-exception port (stack-ref stack 0) real-key real-args)))
-
 ;; Called from the C code to print an exception.
 ;; Guile prints them a little differently than we want.
 ;; See boot-9.scm:print-exception.
 
-(define (%print-exception port frame key args)
-  (cond ((eq? key 'gdb:with-stack)
-	 (%print-with-stack-exception port key args))
-	((memq key %exception-keys)
-	 (%print-exception-worker port frame key args))
+(define (%print-exception-message port frame key args)
+  (cond ((memq key %exception-keys)
+	 (%print-exception-message-worker port key args))
 	(else
-	 (print-exception port frame key args))))
+	 (print-exception port frame key args)))
+  *unspecified*)
+
+;; Called from the C code to print an exception according to the setting
+;; of "guile print-stack".
+;;
+;; If PORT is #f, use the standard error port.
+;; If STACK is #f, never print the stack, regardless of whether printing it
+;; is enabled.  If STACK is #t, then print it if it is contained in ARGS
+;; (i.e., KEY is gdb:with-stack).  Otherwise STACK is the result of calling
+;; scm_make_stack (which will be ignored in favor of the stack in ARGS if
+;; KEY is gdb:with-stack).
+;; KEY, ARGS are the standard arguments to scm_throw, et.al.
+
+(define (%print-exception-with-stack port stack key args)
+  (let ((style (%exception-print-style)))
+    (if (not (eq? style 'none))
+	(let ((error-port (current-error-port))
+	      (frame #f))
+	  (if (not port)
+	      (set! port error-port))
+	  (if (eq? port error-port)
+	      (begin
+		(force-output (current-output-port))
+		;; In case the current output port is not gdb's output port.
+		(force-output (output-port))))
+
+	  ;; If the exception is gdb:with-stack, unwrap it to get the stack and
+	  ;; underlying exception.  If the caller happens to pass in a stack,
+	  ;; we ignore it and use the one in ARGS instead.
+	  (if (eq? key 'gdb:with-stack)
+	      (begin
+		(set! key (car args))
+		(if stack
+		    (set! stack (cadr args)))
+		(set! args (cddr args))))
+
+	  ;; If caller wanted a stack and there isn't one, disable backtracing.
+	  (if (eq? stack #t)
+	      (set! stack #f))
+	  ;; At this point if stack is true, then it is assumed to be a stack.
+	  (if stack
+	      (set! frame (stack-ref stack 0)))
+
+	  (if (and (eq? style 'full) stack)
+	      (begin
+		;; This is derived from libguile/throw.c:handler_message.
+		;; We include "Guile" in "Guile Backtrace" whereas the Guile
+		;; version does not so that tests can know it's us printing
+		;; the backtrace.  Plus it could help beginners.
+		(display "Guile Backtrace:\n" port)
+		(display-backtrace stack port #f #f '())
+		(newline port)))
+
+	  (%print-exception-message port frame key args)))))
 
 ;; Internal utility to check the type of an argument, akin to SCM_ASSERT_TYPE.
 ;; It's public so other gdb modules can use it.
@@ -109,16 +150,17 @@
 		 "Wrong type argument in position ~a: ~s"
 		 (list pos arg) (list arg))))
 
-;; Internal utility called during startup to initialize this GDB+Guile.
+;; Internal utility called during startup to initialize the Scheme side of
+;; GDB+Guile.
 
-(define (%initialize)
+(define (%initialize!)
   (add-to-load-path (string-append (data-directory)
 				   file-name-separator-string "guile"))
 
   (for-each (lambda (key)
-	      (set-exception-printer! key %error-printer))
+	      (set-exception-printer! key %exception-printer))
 	    %exception-keys)
-  (set-exception-printer! 'gdb:with-stack %print-with-stack-exception-message)
+  (set-exception-printer! 'gdb:with-stack %with-stack-exception-printer)
 
   (set! %orig-input-port (set-current-input-port (input-port)))
   (set! %orig-output-port (set-current-output-port (output-port)))

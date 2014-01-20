@@ -1,4 +1,4 @@
-# Copyright (C) 2010-2013 Free Software Foundation, Inc.
+# Copyright (C) 2010-2014 Free Software Foundation, Inc.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -116,7 +116,7 @@ proc test_bkpt_deletion { } {
 	# Test breakpoints are deleted correctly.
 	set deltst_location [gdb_get_line_number "Break at multiply."]
 	set end_location [gdb_get_line_number "Break at end."]
-	gdb_scm_test_silent_cmd  "guile (define dp1 (make-breakpoint \"$deltst_location\"))" \
+	gdb_scm_test_silent_cmd  "guile (define dp1 (create-breakpoint! \"$deltst_location\"))" \
 	    "create deltst breakpoint"
 	gdb_breakpoint [gdb_get_line_number "Break at end."]
 	gdb_scm_test_silent_cmd "guile (define del-list (breakpoints))" \
@@ -151,7 +151,7 @@ proc test_bkpt_cond_and_cmds { } {
 
 	# Test conditional setting.
 	set bp_location1 [gdb_get_line_number "Break at multiply."]
-	gdb_scm_test_silent_cmd  "guile (define bp1 (make-breakpoint \"$bp_location1\"))" \
+	gdb_scm_test_silent_cmd  "guile (define bp1 (create-breakpoint! \"$bp_location1\"))" \
 	    "create multiply breakpoint"
 	gdb_continue_to_breakpoint "Break at multiply."
 	gdb_scm_test_silent_cmd  "guile (set-breakpoint-condition! bp1 \"i == 5\")" \
@@ -199,7 +199,7 @@ proc test_bkpt_invisible { } {
 	# Test invisible breakpoints.
 	delete_breakpoints
 	set ibp_location [gdb_get_line_number "Break at multiply."]
-	gdb_scm_test_silent_cmd  "guile (define vbp (make-breakpoint \"$ibp_location\" #:internal #f))" \
+	gdb_scm_test_silent_cmd  "guile (define vbp (create-breakpoint! \"$ibp_location\" #:internal #f))" \
 	    "create visible breakpoint"
 	gdb_scm_test_silent_cmd "guile (define vbp (car (breakpoints)))" \
 	    "get visible breakpoint"
@@ -214,7 +214,7 @@ proc test_bkpt_invisible { } {
 	    "scm-breakpoint\.c:$ibp_location.*" \
 	    "check info breakpoints shows visible breakpoints"
 	delete_breakpoints
-	gdb_scm_test_silent_cmd  "guile (define ibp (make-breakpoint \"$ibp_location\" #:internal #t))" \
+	gdb_scm_test_silent_cmd  "guile (define ibp (create-breakpoint! \"$ibp_location\" #:internal #t))" \
 	    "create invisible breakpoint"
 	gdb_test "guile (print ibp)" \
 	    "= #<gdb:breakpoint #-$decimal BP_BREAKPOINT enabled noisy hit:0 ignore:0 @.*scm-breakpoint.c:$ibp_location>" \
@@ -247,7 +247,7 @@ proc test_watchpoints { } {
 	    return
 	}
 
-	gdb_scm_test_silent_cmd  "guile (define wp1 (make-breakpoint \"result\" #:type BP_WATCHPOINT #:wp-class WP_WRITE))" \
+	gdb_scm_test_silent_cmd  "guile (define wp1 (create-breakpoint! \"result\" #:type BP_WATCHPOINT #:wp-class WP_WRITE))" \
 	    "create watchpoint"
 	gdb_test "continue" \
 	    ".*\[Ww\]atchpoint.*result.*Old value = 0.*New value = 25.*main.*" \
@@ -272,7 +272,7 @@ proc test_bkpt_internal { } {
 
 	delete_breakpoints
 
-	gdb_scm_test_silent_cmd  "guile (define wp1 (make-breakpoint \"result\" #:type BP_WATCHPOINT #:wp-class WP_WRITE #:internal #t))" \
+	gdb_scm_test_silent_cmd  "guile (define wp1 (create-breakpoint! \"result\" #:type BP_WATCHPOINT #:wp-class WP_WRITE #:internal #t))" \
 	    "create invisible watchpoint"
 	gdb_test "info breakpoints" \
 	    "No breakpoints or watchpoints.*" \
@@ -310,14 +310,14 @@ proc test_bkpt_eval_funcs { } {
 	    "(define set-bp-data-count! set-car!)" "" \
 	    "(define bp-data-inf-i cdr)" "" \
 	    "(define set-bp-data-inf-i! set-cdr!)" "" \
-	    "(define (bp-eval-count bkpt) (bp-data-count (gsmob-aux bkpt)))" "" \
-	    "(define (bp-eval-inf-i bkpt) (bp-data-inf-i (gsmob-aux bkpt)))" "" \
+	    "(define (bp-eval-count bkpt) (bp-data-count (gsmob-property bkpt 'bp-data)))" "" \
+	    "(define (bp-eval-inf-i bkpt) (bp-data-inf-i (gsmob-property bkpt 'bp-data)))" "" \
 	    "(define (make-bp-eval location)" "" \
-	    "  (let ((bp (make-breakpoint location)))" "" \
-	    "    (set-gsmob-aux! bp (make-bp-data))" "" \
+	    "  (let ((bp (create-breakpoint! location)))" "" \
+	    "    (set-gsmob-property! bp 'bp-data (make-bp-data))" "" \
 	    "    (set-breakpoint-stop! bp" "" \
 	    "       (lambda (bkpt)" "" \
-	    "         (let ((data (gsmob-aux bkpt))" "" \
+	    "         (let ((data (gsmob-property bkpt 'bp-data))" "" \
 	    "               (inf-i (parse-and-eval \"i\")))" "" \
 	    "           (set-bp-data-count! data (+ (bp-data-count data) 1))" "" \
 	    "           (set-bp-data-inf-i! data inf-i)" "" \
@@ -328,11 +328,11 @@ proc test_bkpt_eval_funcs { } {
 	gdb_test_multiline "data collection breakpoint 2" \
 	    "guile" "" \
 	    "(define (make-bp-also-eval location)" "" \
-	    "  (let ((bp (make-breakpoint location)))" "" \
-	    "    (set-gsmob-aux! bp (make-bp-data))" "" \
+	    "  (let ((bp (create-breakpoint! location)))" "" \
+	    "    (set-gsmob-property! bp 'bp-data (make-bp-data))" "" \
 	    "    (set-breakpoint-stop! bp" "" \
 	    "       (lambda (bkpt)" "" \
-	    "         (let* ((data (gsmob-aux bkpt))" "" \
+	    "         (let* ((data (gsmob-property bkpt 'bp-data))" "" \
 	    "                (count (+ (bp-data-count data) 1)))" "" \
 	    "           (set-bp-data-count! data count)" "" \
 	    "           (= count 9))))" "" \
@@ -342,8 +342,8 @@ proc test_bkpt_eval_funcs { } {
 	gdb_test_multiline "data collection breakpoint 3" \
 	    "guile" "" \
 	    "(define (make-bp-basic location)" "" \
-	    "  (let ((bp (make-breakpoint location)))" "" \
-	    "    (set-gsmob-aux! bp (make-bp-data))" "" \
+	    "  (let ((bp (create-breakpoint! location)))" "" \
+	    "    (set-gsmob-property! bp 'bp-data (make-bp-data))" "" \
 	    "    bp))" "" \
 	    "end" ""
 
@@ -407,7 +407,7 @@ proc test_bkpt_eval_funcs { } {
 	gdb_test_multiline "watchpoint stop func" \
 	    "guile" "" \
 	    "(define (make-wp-eval location)" "" \
-	    "  (let ((wp (make-breakpoint location #:type BP_WATCHPOINT #:wp-class WP_WRITE)))" "" \
+	    "  (let ((wp (create-breakpoint! location #:type BP_WATCHPOINT #:wp-class WP_WRITE)))" "" \
 	    "    (set-breakpoint-stop! wp" "" \
 	    "      (lambda (bkpt)" "" \
 	    "        (let ((result (parse-and-eval \"result\")))" "" \

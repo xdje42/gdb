@@ -1,6 +1,6 @@
 /* Scheme interface to objfiles.
 
-   Copyright (C) 2008-2013 Free Software Foundation, Inc.
+   Copyright (C) 2008-2014 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -43,11 +43,6 @@ struct _objfile_smob
      the object since a reference to it comes from non-gc-managed space
      (the objfile).  */
   SCM containing_scm;
-
-  /* The result of passing containing_scm through *smob->scm*.
-     This value is initialized to SCM_UNDEFINED and is lazily computed.
-     If there is no *smob->scm* procedure it is set to #f.  */
-  SCM converted_containing_scm;
 };
 
 static const char objfile_smob_name[] = "gdb:objfile";
@@ -76,9 +71,8 @@ ofscm_mark_objfile_smob (SCM self)
 
   scm_gc_mark (o_smob->pretty_printers);
 
-  /* We don't mark containing_scm, converted_containing_scm here.
-     Those are just backlinks to our container, and are gc'protected
-     until the objfile is deleted.  */
+  /* We don't mark containing_scm here.  It is just a backlink to our
+     container, and is gc'protected until the objfile is deleted.  */
 
   /* Do this last.  */
   return gdbscm_mark_gsmob (&o_smob->base);
@@ -109,7 +103,7 @@ ofscm_print_objfile_smob (SCM self, SCM port, scm_print_state *pstate)
    with it.  */
 
 static SCM
-ofscm_make_objfile_gsmob (void)
+ofscm_make_objfile_smob (void)
 {
   objfile_smob *o_smob = (objfile_smob *)
     scm_gc_malloc (sizeof (objfile_smob), objfile_smob_name);
@@ -119,7 +113,6 @@ ofscm_make_objfile_gsmob (void)
   o_smob->pretty_printers = SCM_EOL;
   o_scm = scm_new_smob (objfile_smob_tag, (scm_t_bits) o_smob);
   o_smob->containing_scm = o_scm;
-  o_smob->converted_containing_scm = SCM_UNDEFINED;
   gdbscm_init_gsmob (&o_smob->base);
 
   return o_scm;
@@ -132,9 +125,6 @@ ofscm_release_objfile (objfile_smob *o_smob)
 {
   o_smob->objfile = NULL;
   scm_gc_unprotect_object (o_smob->containing_scm);
-  if (!SCM_UNBNDP (o_smob->converted_containing_scm)
-      && !gdbscm_is_false (o_smob->converted_containing_scm))
-    scm_gc_unprotect_object (o_smob->converted_containing_scm);
 }
 
 /* Objfile registry cleanup handler for when an objfile is deleted.  */
@@ -147,21 +137,6 @@ ofscm_handle_objfile_deleted (struct objfile *objfile, void *datum)
   gdb_assert (o_smob->objfile == objfile);
 
   ofscm_release_objfile (o_smob);
-}
-
-/* Set the converted_containing_scm field of O_SMOB to SCM.
-   SCM is either #f or the result of passing containing_scm through
-   *smob->scm*.
-   The object is protected from GC until the objfile is freed.  */
-
-static void
-ofscm_set_converted_containing_scm (objfile_smob *o_smob, SCM scm)
-{
-  gdb_assert (SCM_UNBNDP (o_smob->converted_containing_scm));
-
-  o_smob->converted_containing_scm = scm;
-  if (!gdbscm_is_false (scm))
-    scm_gc_protect_object (scm);
 }
 
 /* Return non-zero if SCM is a <gdb:objfile> object.  */
@@ -192,7 +167,7 @@ ofscm_objfile_smob_from_objfile (struct objfile *objfile)
   o_smob = objfile_data (objfile, ofscm_objfile_data_key);
   if (o_smob == NULL)
     {
-      SCM o_scm = ofscm_make_objfile_gsmob ();
+      SCM o_scm = ofscm_make_objfile_smob ();
 
       o_smob = (objfile_smob *) SCM_SMOB_DATA (o_scm);
       o_smob->objfile = objfile;
@@ -204,62 +179,30 @@ ofscm_objfile_smob_from_objfile (struct objfile *objfile)
   return o_smob;
 }
 
-/* Return the  <gdb:objfile> object that encapsulates OBJFILE,
-   passing it through *smob->scm*.
-   A Scheme exception is thrown if there is an error.  */
+/* Return the <gdb:objfile> object that encapsulates OBJFILE.  */
 
 SCM
-ofscm_scm_from_objfile_unsafe (struct objfile *objfile)
+ofscm_scm_from_objfile (struct objfile *objfile)
 {
   objfile_smob *o_smob = ofscm_objfile_smob_from_objfile (objfile);
-  SCM result;
 
-  result = o_smob->converted_containing_scm;
-  if (SCM_UNBNDP (result))
-    {
-      result = gdbscm_scm_from_gsmob_safe (o_smob->containing_scm);
-
-      if (gdbscm_is_exception (result))
-	gdbscm_throw (result);
-
-      ofscm_set_converted_containing_scm (o_smob, result);
-    }
-
-  return result;
-}
-
-/* Returns the <gdb:objfile> object in SCM or #f if SCM is not a
-   <gdb:objfile> object.
-   Returns a <gdb:exception> object if there was a problem during the
-   conversion.  */
-
-static SCM
-ofscm_scm_to_objfile_gsmob (SCM scm)
-{
-  return gdbscm_scm_to_gsmob_safe (scm, objfile_smob_tag);
+  return o_smob->containing_scm;
 }
 
 /* Returns the <gdb:objfile> object in SELF.
-   Throws an exception if SELF is not a <gdb:objfile> object
-   (after passing it through *scm->smob*).  */
+   Throws an exception if SELF is not a <gdb:objfile> object.  */
 
 static SCM
 ofscm_get_objfile_arg_unsafe (SCM self, int arg_pos, const char *func_name)
 {
-  SCM o_scm = ofscm_scm_to_objfile_gsmob (self);
-
-  if (gdbscm_is_exception (o_scm))
-    gdbscm_throw (o_scm);
-
-  SCM_ASSERT_TYPE (ofscm_is_objfile (o_scm), self, arg_pos, func_name,
+  SCM_ASSERT_TYPE (ofscm_is_objfile (self), self, arg_pos, func_name,
 		   objfile_smob_name);
 
-  return o_scm;
+  return self;
 }
 
 /* Returns a pointer to the objfile smob of SELF.
-   Throws an exception if SELF is not a <gdb:objfile> object
-   (after passing it through *scm->smob*).  */
+   Throws an exception if SELF is not a <gdb:objfile> object.  */
 
 static objfile_smob *
 ofscm_get_objfile_smob_arg_unsafe (SCM self, int arg_pos,
@@ -280,8 +223,7 @@ ofscm_is_valid (objfile_smob *o_smob)
 }
 
 /* Return the objfile smob in SELF, verifying it's valid.
-   Throws an exception if SELF is not a <gdb:objfile> object or is invalid
-   (after passing it through *scm->smob*).  */
+   Throws an exception if SELF is not a <gdb:objfile> object or is invalid.  */
 
 static objfile_smob *
 ofscm_get_valid_objfile_smob_arg_unsafe (SCM self, int arg_pos,
@@ -396,7 +338,7 @@ gdbscm_get_current_objfile (void)
   if (ofscm_current_objfile == NULL)
     return SCM_BOOL_F;
 
-  return ofscm_scm_from_objfile_unsafe (ofscm_current_objfile);
+  return ofscm_scm_from_objfile (ofscm_current_objfile);
 }
 
 /* (objfiles) -> list
@@ -412,7 +354,7 @@ gdbscm_objfiles (void)
 
   ALL_OBJFILES (objf)
   {
-    SCM item = ofscm_scm_from_objfile_unsafe (objf);
+    SCM item = ofscm_scm_from_objfile (objf);
 
     result = scm_cons (item, result);
   }

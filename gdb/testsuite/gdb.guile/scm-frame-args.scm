@@ -1,4 +1,4 @@
-;; Copyright (C) 2013 Free Software Foundation, Inc.
+;; Copyright (C) 2014 Free Software Foundation, Inc.
 ;;
 ;; This program is free software; you can redistribute it and/or modify
 ;; it under the terms of the GNU General Public License as published by
@@ -33,11 +33,10 @@
 		    (lambda (iter)
 		      (let ((field (iterator-next!
 				    (iterator-progress iter))))
-			(and field
-			     (let ((name (field-name field)))
-			       (cons
-				name
-				(value-field val name))))))))))
+			(if (end-of-iteration? field)
+			    field
+			    (let ((name (field-name field)))
+			      (cons name (value-field val name))))))))))
 
 (define (get-type-for-printing val)
   "Return type of val, stripping away typedefs, etc."

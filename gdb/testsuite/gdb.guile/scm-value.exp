@@ -1,4 +1,4 @@
-# Copyright (C) 2008-2013 Free Software Foundation, Inc.
+# Copyright (C) 2008-2014 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -161,6 +161,40 @@ proc test_value_in_inferior {} {
 
 proc test_strings {} {
     gdb_test "gu (make-value \"test\")" "#<gdb:value \"test\">" "make string"
+
+    # Test string conversion errors.
+    set save_charset [get_target_charset]
+    gdb_test_no_output "set target-charset UTF-8"
+
+    gdb_test_no_output "gu (set-port-conversion-strategy! #f 'error)"
+    gdb_test "gu (print (value->string (make-value (string #\\x1234)) #:encoding \"ASCII\"))" \
+	"ERROR.*decoding-error.*" \
+	"value->string with default #:errors = 'error"
+
+    # There is no 'escape strategy for C->SCM string conversions, but it's
+    # still a legitimate value for %default-port-conversion-strategy.
+    # GDB handles this by, umm, substituting 'substitute.
+    # Use this case to also handle "#:errors #f" which explicitly says
+    # "use %default-port-conversion-strategy".
+    gdb_test_no_output "gu (set-port-conversion-strategy! #f 'escape)"
+    gdb_test "gu (print (value->string (make-value (string #\\x1234)) #:encoding \"ASCII\" #:errors #f))" \
+	"= \[?\]{3}" "value->string with default #:errors = 'escape"
+
+    # This is last in the default conversion tests so that
+    # %default-port-conversion-strategy ends up with the default value.
+    gdb_test_no_output "gu (set-port-conversion-strategy! #f 'substitute)"
+    gdb_test "gu (print (value->string (make-value (string #\\x1234)) #:encoding \"ASCII\"))" \
+	"= \[?\]{3}" "value->string with default #:errors = 'substitute"
+
+    gdb_test "gu (print (value->string (make-value (string #\\x1234)) #:encoding \"ASCII\" #:errors 'error))" \
+	"ERROR.*decoding-error.*" "value->string #:errors 'error"
+    gdb_test "gu (print (value->string (make-value (string #\\x1234)) #:encoding \"ASCII\" #:errors 'substitute))" \
+	"= \[?\]{3}" "value->string #:errors 'substitute"
+    gdb_test "gu (print (value->string (make-value \"abc\") #:errors \"foo\"))" \
+	"ERROR.*invalid error kind.*" "bad value for #:errors"
+
+    gdb_test_no_output "set target-charset $save_charset" \
+	"restore target-charset"
 }
 
 proc test_lazy_strings {} {
