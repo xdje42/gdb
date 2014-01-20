@@ -220,15 +220,21 @@ struct extension_language_ops
   enum ext_lang_bp_stop (*breakpoint_cond_says_stop)
     (const struct extension_language_defn *, struct breakpoint *);
 
-  /* The next three are used to connect gdb's SIGINT handling with the
+  /* The next three are used to connect GDB's SIGINT handling with the
      extension language's.
+
+     Terminology: If an extension language can use GDB's SIGINT handling then
+     we say the extension language has "cooperative SIGINT handling".
+     Python is an example of this.
+
      These need not be implemented, but if one of them is implemented
      then they all must be.  */
 
   /* Clear the SIGINT indicator.  */
   void (*clear_quit_flag) (const struct extension_language_defn *);
 
-  /* Set the SIGINT indicator.  */
+  /* Set the SIGINT indicator.
+     This is called by GDB's SIGINT handler and must be async-safe.  */
   void (*set_quit_flag) (const struct extension_language_defn *);
 
   /* Return non-zero if a SIGINT has occurred.
@@ -245,5 +251,35 @@ struct extension_language_ops
   enum ext_lang_rc (*before_prompt) (const struct extension_language_defn *,
 				     const char *current_gdb_prompt);
 };
+
+/* State necessary to restore a signal handler to its previous value.  */
+
+struct signal_handler
+{
+  /* Non-zero if "handler" has been set.  */
+  int handler_saved;
+
+  /* The signal handler.  */
+  RETSIGTYPE (*handler) ();
+};
+
+/* State necessary to restore the currently active extension language
+   to is previous value.  */
+
+struct active_ext_lang_state
+{
+  /* The previously active extension language.  */
+  const struct extension_language_defn *ext_lang;
+
+  /* Its SIGINT handler.  */
+  struct signal_handler sigint_handler;
+};
+
+extern const struct extension_language_defn *get_active_ext_lang (void);
+
+extern struct active_ext_lang_state *set_active_ext_lang
+  (const struct extension_language_defn *);
+
+extern void restore_active_ext_lang (struct active_ext_lang_state *previous);
 
 #endif /* EXTENSION_PRIV_H */
