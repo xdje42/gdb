@@ -199,6 +199,7 @@ const struct language_defn *python_language;
 
 struct python_env
 {
+  struct active_ext_lang_state *previous_active;
   PyGILState_STATE state;
   struct gdbarch *gdbarch;
   const struct language_defn *language;
@@ -223,11 +224,17 @@ restore_python_env (void *p)
   PyGILState_Release (env->state);
   python_gdbarch = env->gdbarch;
   python_language = env->language;
+
+  restore_active_ext_lang (env->previous_active);
+
   xfree (env);
 }
 
 /* Called before entering the Python interpreter to install the
-   current language and architecture to be used for Python values.  */
+   current language and architecture to be used for Python values.
+   Also set the active extension language for GDB so that SIGINT's
+   are directed our way, and if necessary install the right SIGINT
+   handler.  */
 
 struct cleanup *
 ensure_python_env (struct gdbarch *gdbarch,
@@ -238,6 +245,8 @@ ensure_python_env (struct gdbarch *gdbarch,
   /* We should not ever enter Python unless initialized.  */
   if (!gdb_python_initialized)
     error (_("Python not initialized"));
+
+  env->previous_active = set_active_ext_lang (&extension_language_python);
 
   env->state = PyGILState_Ensure ();
   env->gdbarch = python_gdbarch;
@@ -1519,16 +1528,25 @@ user_show_python (char *args, int from_tty)
 static void
 finalize_python (void *ignore)
 {
+  struct active_ext_lang_state *previous_active;
+
   /* We don't use ensure_python_env here because if we ever ran the
      cleanup, gdb would crash -- because the cleanup calls into the
      Python interpreter, which we are about to destroy.  It seems
      clearer to make the needed calls explicitly here than to create a
      cleanup and then mysteriously discard it.  */
+
+  /* This is only called as a final cleanup so we can assume the active
+     SIGINT handler is gdb's.  We still need to tell it to notify Python.  */
+  previous_active = set_active_ext_lang (&extension_language_python);
+
   (void) PyGILState_Ensure ();
   python_gdbarch = target_gdbarch ();
   python_language = current_language;
 
   Py_Finalize ();
+
+  restore_active_ext_lang (previous_active);
 }
 #endif
 
