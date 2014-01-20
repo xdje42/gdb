@@ -21,8 +21,10 @@
    have "ext_lang" in the name, and no other symbol in gdb does.  */
 
 #include "defs.h"
+#include <signal.h>
 #include "auto-load.h"
 #include "breakpoint.h"
+#include "event-top.h"
 #include "extension.h"
 #include "extension-priv.h"
 #include "observer.h"
@@ -387,7 +389,7 @@ struct ext_lang_type_printers *
 start_ext_lang_type_printers (void)
 {
   struct ext_lang_type_printers *printers
-    = XZALLOC (struct ext_lang_type_printers);
+    = XCNEW (struct ext_lang_type_printers);
   int i;
   const struct extension_language_defn *extlang;
 
@@ -644,15 +646,129 @@ breakpoint_ext_lang_cond_says_stop (struct breakpoint *b)
 
 /* ^C/SIGINT support.
    This requires cooperation with the extension languages so the support
-   is defined here.
-   The prototypes for these are in defs.h.  */
+   is defined here.  */
 
-/* Nonzero means a quit has been requested.
-   This flag tracks quit requests but it's only used if the extension language
-   doesn't provide the necessary support.  */
+/* This flag tracks quit requests when we haven't called out to an
+   extension language.  it also holds quit requests when we transition to
+   an extension language that doesn't have cooperative SIGINT handling.  */
 static int quit_flag;
 
-/* Clear the quit flag.  */
+/* The current extension language we've called out to, or
+   extension_language_gdb if there isn't one.
+   This must be set everytime we call out to an extension language, and reset
+   to the previous value when it returns.  Note that the previous value may
+   be a different (or the same) extension language.  */
+static const struct extension_language_defn *active_ext_lang
+  = &extension_language_gdb;
+
+/* Return the currently active extension language.  */
+
+const struct extension_language_defn *
+get_active_ext_lang (void)
+{
+  return active_ext_lang;
+}
+
+/* Install a SIGINT handler.  */
+
+static void
+install_sigint_handler (const struct signal_handler *handler_state)
+{
+  gdb_assert (handler_state->handler_saved);
+
+  signal (SIGINT, handler_state->handler);
+}
+
+/* Install GDB's SIGINT handler, storing the previous version in *PREVIOUS.
+   As a simple optimization, if the previous version was GDB's SIGINT handler
+   then mark the previous handler as not having been saved, and thus it won't
+   be restored.  */
+
+static void
+install_gdb_sigint_handler (struct signal_handler *previous)
+{
+  /* Save here to simplify comparison.  */
+  RETSIGTYPE (*handle_sigint_for_compare) () = handle_sigint;
+
+  previous->handler = signal (SIGINT, handle_sigint);
+  if (previous->handler != handle_sigint_for_compare)
+    previous->handler_saved = 1;
+  else
+    previous->handler_saved = 0;
+}
+
+/* Set the currently active extension language to NOW_ACTIVE.
+   The result is a pointer to a malloc'd block of memory to pass to
+   restore_active_ext_lang.
+
+   N.B. This function must be called every time we call out to an extension
+   language, and the result must be passed to restore_active_ext_lang
+   afterwards.
+
+   If there is a pending SIGINT it is "moved" to the now active extension
+   language, if it supports cooperative SIGINT handling (i.e., it provides
+   {clear,set,check}_quit_flag methods).  If the extension language does not
+   support cooperative SIGINT handling, then the SIGINT is left queued and
+   we require the non-cooperative extension language to call check_quit_flag
+   at appropriate times.
+   It is important for the extension language to call check_quit_flag if it
+   installs its own SIGINT handler to prevent the situation where a SIGINT
+   is queued on entry, extension language code runs for a "long" time possibly
+   serving one or more SIGINTs, and then returns.  Upon return, if
+   check_quit_flag is not called, the original SIGINT will be thrown.
+   Non-cooperative extension languages are free to install their own SIGINT
+   handler but the original must be restored upon return, either itself
+   or via restore_active_ext_lang.  */
+
+struct active_ext_lang_state *
+set_active_ext_lang (const struct extension_language_defn *now_active)
+{
+  struct active_ext_lang_state *previous
+    = XCNEW (struct active_ext_lang_state);
+
+  previous->ext_lang = active_ext_lang;
+  active_ext_lang = now_active;
+
+  /* If the newly active extension language uses cooperative SIGINT handling
+     then ensure GDB's SIGINT handler is installed.  */
+  if (now_active->language == EXT_LANG_GDB
+      || now_active->ops->check_quit_flag != NULL)
+    install_gdb_sigint_handler (&previous->sigint_handler);
+
+  /* If there's a SIGINT recorded in the cooperative extension languages,
+     move it to the new language, or save it in GDB's global flag if the newly
+     active extension language doesn't use cooperative SIGINT handling.  */
+  if (check_quit_flag ())
+    set_quit_flag ();
+
+  return previous;
+}
+
+/* Restore active extension language from PREVIOUS.  */
+
+void
+restore_active_ext_lang (struct active_ext_lang_state *previous)
+{
+  const struct extension_language_defn *current = active_ext_lang;
+
+  active_ext_lang = previous->ext_lang;
+
+  /* Restore the previous SIGINT handler if one was saved.  */
+  if (previous->sigint_handler.handler_saved)
+    install_sigint_handler (&previous->sigint_handler);
+
+  /* If there's a SIGINT recorded in the cooperative extension languages,
+     move it to the new language, or save it in GDB's global flag if the newly
+     active extension language doesn't use cooperative SIGINT handling.  */
+  if (check_quit_flag ())
+    set_quit_flag ();
+
+  xfree (previous);
+}
+
+/* Clear the quit flag.
+   The flag is cleared in all extension languages,
+   not just the currently active one.  */
 
 void
 clear_quit_flag (void)
@@ -669,26 +785,28 @@ clear_quit_flag (void)
   quit_flag = 0;
 }
 
-/* Set the quit flag.  */
+/* Set the quit flag.
+   This only sets the flag in the currently active extension language.
+   If the currently active extension language does not have cooperative
+   SIGINT handling, then GDB's global flag is set, and it is up to the
+   extension language to call check_quit_flag.  The extension language
+   is free to install its own SIGINT handler, but we still need to handle
+   the transition.  */
 
 void
 set_quit_flag (void)
 {
-  int i;
-  const struct extension_language_defn *extlang;
-
-  ALL_ENABLED_EXTENSION_LANGUAGES (i, extlang)
-    {
-      if (extlang->ops->set_quit_flag != NULL)
-	extlang->ops->set_quit_flag (extlang);
-    }
-
-  quit_flag = 1;
+  if (active_ext_lang->ops != NULL
+      && active_ext_lang->ops->set_quit_flag != NULL)
+    active_ext_lang->ops->set_quit_flag (active_ext_lang);
+  else
+    quit_flag = 1;
 }
 
 /* Return true if the quit flag has been set, false otherwise.
-   Extension languages may need their own control over whether SIGINT has
-   been seen.  */
+   Note: The flag is cleared as a side-effect.
+   The flag is checked in all extension languages that support cooperative
+   SIGINT handling, not just the current one.  This simplifies transitions.  */
 
 int
 check_quit_flag (void)
