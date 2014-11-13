@@ -1413,10 +1413,10 @@ arm_skip_prologue (struct gdbarch *gdbarch, CORE_ADDR pc)
 	 missing (e.g. for -gstabs), assuming the GNU tools.  */
       if (post_prologue_pc
 	  && (cust == NULL
-	      || COMPUNIT_SYMTAB_PRODUCER (cust) == NULL
-	      || strncmp (COMPUNIT_SYMTAB_PRODUCER (cust), "GNU ",
+	      || COMPUNIT_PRODUCER (cust) == NULL
+	      || strncmp (COMPUNIT_PRODUCER (cust), "GNU ",
 			  sizeof ("GNU ") - 1) == 0
-	      || strncmp (COMPUNIT_SYMTAB_PRODUCER (cust), "clang ",
+	      || strncmp (COMPUNIT_PRODUCER (cust), "clang ",
 			  sizeof ("clang ") - 1) == 0))
 	return post_prologue_pc;
 
