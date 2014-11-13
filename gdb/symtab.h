@@ -774,7 +774,7 @@ extern const struct symbol_impl *symbol_impls;
 #define SYMBOL_BLOCK_OPS(symbol)	(SYMBOL_IMPL (symbol).ops_block)
 #define SYMBOL_REGISTER_OPS(symbol)	(SYMBOL_IMPL (symbol).ops_register)
 #define SYMBOL_LOCATION_BATON(symbol)   (symbol)->aux_value
-#define SYMBOL_OBJFILE(symbol) 		(SYMBOL_SYMTAB (symbol)->objfile)
+#define SYMBOL_OBJFILE(symbol)		SYMTAB_OBJFILE (SYMBOL_SYMTAB (symbol))
 
 extern int register_symbol_computed_impl (enum address_class,
 					  const struct symbol_computed_ops *);
@@ -980,9 +980,11 @@ struct symtab
   struct symtab *user;
 };
 
-#define BLOCKVECTOR(symtab)	(symtab)->blockvector
-#define LINETABLE(symtab)	(symtab)->linetable
-#define SYMTAB_PSPACE(symtab)	(symtab)->objfile->pspace
+#define SYMTAB_BLOCKVECTOR(symtab) ((symtab)->blockvector)
+#define SYMTAB_LINETABLE(symtab) ((symtab)->linetable)
+#define SYMTAB_OBJFILE(symtab)	((symtab)->objfile)
+#define SYMTAB_PSPACE(symtab)	(SYMTAB_OBJFILE (symtab)->pspace)
+#define SYMTAB_DIRNAME(symtab)	((symtab)->dirname)
 
 /* Call this to set the "primary" field in struct symtab.  */
 extern void set_symtab_primary (struct symtab *, int primary);
@@ -1163,10 +1165,9 @@ extern int find_pc_partial_function (CORE_ADDR, const char **, CORE_ADDR *,
 
 extern void clear_pc_function_cache (void);
 
-/* lookup partial symbol table by address and section.  */
+/* Expand symtab containing PC, SECTION if not already expanded.  */
 
-extern struct symtab *find_pc_sect_symtab_via_partial (CORE_ADDR,
-						       struct obj_section *);
+extern void expand_symtab_containing_pc (CORE_ADDR, struct obj_section *);
 
 /* lookup full symbol table by address.  */
 
@@ -1271,6 +1272,10 @@ extern struct symtab_and_line find_pc_line (CORE_ADDR, int);
 
 extern struct symtab_and_line find_pc_sect_line (CORE_ADDR,
 						 struct obj_section *, int);
+
+/* Wrapper around find_pc_line to just return the symtab.  */
+
+extern struct symtab *find_pc_line_symtab (CORE_ADDR);
 
 /* Given a symtab and line number, return the pc there.  */
 

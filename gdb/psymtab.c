@@ -510,17 +510,16 @@ lookup_symbol_aux_psymtabs (struct objfile *objfile,
       {
 	struct symbol *sym = NULL;
 	struct symtab *stab = psymtab_to_symtab (objfile, ps);
+	/* Note: While psymtab_to_symtab can return NULL if the partial symtab
+	   is empty, we can assume it won't here because lookup_partial_symbol
+	   succeeded.  */
+	const struct blockvector *bv = SYMTAB_BLOCKVECTOR (stab);
+	struct block *block = BLOCKVECTOR_BLOCK (bv, block_index);
 
 	/* Some caution must be observed with overloaded functions
 	   and methods, since the psymtab will not contain any overload
 	   information (but NAME might contain it).  */
-	if (stab->primary)
-	  {
-	    const struct blockvector *bv = BLOCKVECTOR (stab);
-	    struct block *block = BLOCKVECTOR_BLOCK (bv, block_index);
-
-	    sym = block_lookup_symbol (block, name, domain);
-	  }
+	sym = block_lookup_symbol (block, name, domain);
 
 	if (sym && strcmp_iw (SYMBOL_SEARCH_NAME (sym), name) == 0)
 	  {
@@ -756,7 +755,10 @@ lookup_partial_symbol (struct objfile *objfile,
 }
 
 /* Get the symbol table that corresponds to a partial_symtab.
-   This is fast after the first time you do it.  */
+   This is fast after the first time you do it.
+   The result will be NULL if the primary symtab has no symbols,
+   which can happen.  Otherwise the result is the primary symtab
+   that contains PST.  */
 
 static struct symtab *
 psymtab_to_symtab (struct objfile *objfile, struct partial_symtab *pst)
@@ -778,6 +780,9 @@ psymtab_to_symtab (struct objfile *objfile, struct partial_symtab *pst)
       (*pst->read_symtab) (pst, objfile);
       do_cleanups (back_to);
     }
+
+  if (pst->symtab != NULL)
+    gdb_assert (pst->symtab->primary);
 
   return pst->symtab;
 }
@@ -1259,9 +1264,9 @@ map_matching_symbols_psymtab (struct objfile *objfile,
 	  struct symtab *s = psymtab_to_symtab (objfile, ps);
 	  struct block *block;
 
-	  if (s == NULL || !s->primary)
+	  if (s == NULL)
 	    continue;
-	  block = BLOCKVECTOR_BLOCK (BLOCKVECTOR (s), block_kind);
+	  block = BLOCKVECTOR_BLOCK (SYMTAB_BLOCKVECTOR (s), block_kind);
 	  if (map_block (name, namespace, objfile, block,
 			 callback, data, match))
 	    return;
@@ -2032,7 +2037,7 @@ maintenance_check_psymtabs (char *ignore, int from_tty)
     /* Now do checks requiring the associated symtab.  */
     if (s == NULL)
       continue;
-    bv = BLOCKVECTOR (s);
+    bv = SYMTAB_BLOCKVECTOR (s);
     b = BLOCKVECTOR_BLOCK (bv, STATIC_BLOCK);
     psym = objfile->static_psymbols.list + ps->statics_offset;
     length = ps->n_static_syms;

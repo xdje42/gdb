@@ -641,7 +641,7 @@ free_objfile (struct objfile *objfile)
   {
     struct symtab_and_line cursal = get_current_source_symtab_and_line ();
 
-    if (cursal.symtab && cursal.symtab->objfile == objfile)
+    if (cursal.symtab && SYMTAB_OBJFILE (cursal.symtab) == objfile)
       clear_current_source_symtab_and_line ();
   }
 
@@ -749,7 +749,7 @@ objfile_relocate1 (struct objfile *objfile,
       int i;
 
       /* First the line table.  */
-      l = LINETABLE (s);
+      l = SYMTAB_LINETABLE (s);
       if (l)
 	{
 	  for (i = 0; i < l->nitems; ++i)
@@ -760,7 +760,7 @@ objfile_relocate1 (struct objfile *objfile,
       if (!s->primary)
 	continue;
 
-      bv = BLOCKVECTOR (s);
+      bv = SYMTAB_BLOCKVECTOR (s);
       if (BLOCKVECTOR_MAP (bv))
 	addrmap_relocate (BLOCKVECTOR_MAP (bv),
 			  ANOFFSET (delta, s->block_line_section));

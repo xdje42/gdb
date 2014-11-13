@@ -126,7 +126,7 @@ print_objfile_statistics (void)
     ALL_OBJFILE_SYMTABS (objfile, s)
       {
         i++;
-        if (s->linetable != NULL)
+        if (SYMTAB_LINETABLE (s) != NULL)
           linetables++;
         if (s->primary == 1)
           blockvectors++;
@@ -182,7 +182,7 @@ dump_objfile (struct objfile *objfile)
 	  printf_filtered ("%s at ", symtab_to_filename_for_display (symtab));
 	  gdb_print_host_address (symtab, gdb_stdout);
 	  printf_filtered (", ");
-	  if (symtab->objfile != objfile)
+	  if (SYMTAB_OBJFILE (symtab) != objfile)
 	    {
 	      printf_filtered ("NOT ON CHAIN!  ");
 	    }
@@ -297,9 +297,9 @@ dump_symtab_1 (struct objfile *objfile, struct symtab *symtab,
 
   fprintf_filtered (outfile, "\nSymtab for file %s\n",
 		    symtab_to_filename_for_display (symtab));
-  if (symtab->dirname)
+  if (SYMTAB_DIRNAME (symtab) != NULL)
     fprintf_filtered (outfile, "Compilation directory is %s\n",
-		      symtab->dirname);
+		      SYMTAB_DIRNAME (symtab));
   fprintf_filtered (outfile, "Read from object file %s (",
 		    objfile_name (objfile));
   gdb_print_host_address (objfile, outfile);
@@ -308,7 +308,7 @@ dump_symtab_1 (struct objfile *objfile, struct symtab *symtab,
 		    language_str (symtab->language));
 
   /* First print the line table.  */
-  l = LINETABLE (symtab);
+  l = SYMTAB_LINETABLE (symtab);
   if (l)
     {
       fprintf_filtered (outfile, "\nLine table:\n\n");
@@ -325,7 +325,7 @@ dump_symtab_1 (struct objfile *objfile, struct symtab *symtab,
   if (symtab->primary)
     {
       fprintf_filtered (outfile, "\nBlockvector:\n\n");
-      bv = BLOCKVECTOR (symtab);
+      bv = SYMTAB_BLOCKVECTOR (symtab);
       len = BLOCKVECTOR_NBLOCKS (bv);
       for (i = 0; i < len; i++)
 	{
@@ -753,7 +753,8 @@ maintenance_info_symtabs (char *regexp, int from_tty)
 	      printf_filtered ("((struct symtab *) %s)\n",
 			       host_address_to_string (symtab));
 	      printf_filtered ("	  dirname %s\n",
-			       symtab->dirname ? symtab->dirname : "(null)");
+			       SYMTAB_DIRNAME (symtab) != NULL
+			       ? SYMTAB_DIRNAME (symtab) : "(null)");
 	      printf_filtered ("	  fullname %s\n",
 			       symtab->fullname ? symtab->fullname : "(null)");
 	      printf_filtered ("	  "
@@ -762,7 +763,8 @@ maintenance_info_symtabs (char *regexp, int from_tty)
 			       symtab->primary ? " (primary)" : "");
 	      printf_filtered ("	  "
 			       "linetable ((struct linetable *) %s)\n",
-			       host_address_to_string (symtab->linetable));
+			       host_address_to_string
+				 (SYMTAB_LINETABLE (symtab)));
 	      printf_filtered ("	  debugformat %s\n",
 			       symtab->debugformat);
 	      printf_filtered ("	}\n");

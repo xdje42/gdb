@@ -645,7 +645,7 @@ finalize_symtab (struct gdb_symtab *stab, struct objfile *objfile)
 
   symtab = allocate_symtab (stab->file_name, objfile);
   /* JIT compilers compile in memory.  */
-  symtab->dirname = NULL;
+  SYMTAB_DIRNAME (symtab) = NULL;
 
   /* Copy over the linetable entry if one was provided.  */
   if (stab->linetable)
@@ -653,12 +653,13 @@ finalize_symtab (struct gdb_symtab *stab, struct objfile *objfile)
       size_t size = ((stab->linetable->nitems - 1)
 		     * sizeof (struct linetable_entry)
 		     + sizeof (struct linetable));
-      LINETABLE (symtab) = obstack_alloc (&objfile->objfile_obstack, size);
-      memcpy (LINETABLE (symtab), stab->linetable, size);
+      SYMTAB_LINETABLE (symtab) = obstack_alloc (&objfile->objfile_obstack,
+						 size);
+      memcpy (SYMTAB_LINETABLE (symtab), stab->linetable, size);
     }
   else
     {
-      LINETABLE (symtab) = NULL;
+      SYMTAB_LINETABLE (symtab) = NULL;
     }
 
   blockvector_size = (sizeof (struct blockvector)

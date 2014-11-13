@@ -1045,8 +1045,10 @@ matching_obj_sections (struct obj_section *obj_first,
   return 0;
 }
 
-struct symtab *
-find_pc_sect_symtab_via_partial (CORE_ADDR pc, struct obj_section *section)
+/* See symtab.h.  */
+
+void
+expand_symtab_containing_pc (CORE_ADDR pc, struct obj_section *section)
 {
   struct objfile *objfile;
   struct bound_minimal_symbol msymbol;
@@ -1061,20 +1063,18 @@ find_pc_sect_symtab_via_partial (CORE_ADDR pc, struct obj_section *section)
 	  || MSYMBOL_TYPE (msymbol.minsym) == mst_abs
 	  || MSYMBOL_TYPE (msymbol.minsym) == mst_file_data
 	  || MSYMBOL_TYPE (msymbol.minsym) == mst_file_bss))
-    return NULL;
+    return;
 
   ALL_OBJFILES (objfile)
   {
-    struct symtab *result = NULL;
+    struct symtab *s = NULL;
 
     if (objfile->sf)
-      result = objfile->sf->qf->find_pc_sect_symtab (objfile, msymbol,
-						     pc, section, 0);
-    if (result)
-      return result;
+      s = objfile->sf->qf->find_pc_sect_symtab (objfile, msymbol,
+						pc, section, 0);
+    if (s != NULL)
+      return;
   }
-
-  return NULL;
 }
 
 /* Debug symbols usually don't have section information.  We need to dig that
@@ -1174,7 +1174,7 @@ fixup_symbol_section (struct symbol *sym, struct objfile *objfile)
   gdb_assert (objfile || SYMBOL_SYMTAB (sym));
 
   if (objfile == NULL)
-    objfile = SYMBOL_SYMTAB (sym)->objfile;
+    objfile = SYMBOL_OBJFILE (sym);
 
   if (SYMBOL_OBJ_SECTION (objfile, sym))
     return sym;
@@ -1526,7 +1526,7 @@ lookup_objfile_from_block (const struct block *block)
      Non-primary symtabs share the block vector with their primary symtabs
      so we use ALL_PRIMARY_SYMTABS here instead of ALL_SYMTABS.  */
   ALL_PRIMARY_SYMTABS (obj, s)
-    if (block == BLOCKVECTOR_BLOCK (BLOCKVECTOR (s), GLOBAL_BLOCK))
+    if (block == BLOCKVECTOR_BLOCK (SYMTAB_BLOCKVECTOR (s), GLOBAL_BLOCK))
       {
 	if (obj->separate_debug_objfile_backlink)
 	  obj = obj->separate_debug_objfile_backlink;
@@ -1575,7 +1575,7 @@ lookup_global_symbol_from_objfile (const struct objfile *main_objfile,
       /* Go through symtabs.  */
       ALL_OBJFILE_PRIMARY_SYMTABS (objfile, s)
 	{
-	  bv = BLOCKVECTOR (s);
+	  bv = SYMTAB_BLOCKVECTOR (s);
 	  block = BLOCKVECTOR_BLOCK (bv, GLOBAL_BLOCK);
 	  sym = block_lookup_symbol (block, name, domain);
 	  if (sym)
@@ -1610,7 +1610,7 @@ lookup_symbol_in_objfile_symtabs (struct objfile *objfile, int block_index,
 
   ALL_OBJFILE_PRIMARY_SYMTABS (objfile, s)
     {
-      bv = BLOCKVECTOR (s);
+      bv = SYMTAB_BLOCKVECTOR (s);
       block = BLOCKVECTOR_BLOCK (bv, block_index);
       sym = block_lookup_symbol (block, name, domain);
       if (sym)
@@ -1698,7 +1698,7 @@ lookup_symbol_via_quick_fns (struct objfile *objfile, int block_index,
   if (!symtab)
     return NULL;
 
-  bv = BLOCKVECTOR (symtab);
+  bv = SYMTAB_BLOCKVECTOR (symtab);
   block = BLOCKVECTOR_BLOCK (bv, block_index);
   sym = block_lookup_symbol (block, name, domain);
   if (!sym)
@@ -1923,7 +1923,7 @@ basic_lookup_transparent_type_quick (struct objfile *objfile, int block_index,
   if (!symtab)
     return NULL;
 
-  bv = BLOCKVECTOR (symtab);
+  bv = SYMTAB_BLOCKVECTOR (symtab);
   block = BLOCKVECTOR_BLOCK (bv, block_index);
   sym = block_lookup_symbol (block, name, STRUCT_DOMAIN);
   if (!sym)
@@ -1960,7 +1960,7 @@ basic_lookup_transparent_type (const char *name)
   {
     ALL_OBJFILE_PRIMARY_SYMTABS (objfile, s)
       {
-	bv = BLOCKVECTOR (s);
+	bv = SYMTAB_BLOCKVECTOR (s);
 	block = BLOCKVECTOR_BLOCK (bv, GLOBAL_BLOCK);
 	sym = block_lookup_symbol (block, name, STRUCT_DOMAIN);
 	if (sym && !TYPE_IS_OPAQUE (SYMBOL_TYPE (sym)))
@@ -1988,7 +1988,7 @@ basic_lookup_transparent_type (const char *name)
   {
     ALL_OBJFILE_PRIMARY_SYMTABS (objfile, s)
       {
-	bv = BLOCKVECTOR (s);
+	bv = SYMTAB_BLOCKVECTOR (s);
 	block = BLOCKVECTOR_BLOCK (bv, STATIC_BLOCK);
 	sym = block_lookup_symbol (block, name, STRUCT_DOMAIN);
 	if (sym && !TYPE_IS_OPAQUE (SYMBOL_TYPE (sym)))
@@ -2081,7 +2081,7 @@ find_pc_sect_symtab (CORE_ADDR pc, struct obj_section *section)
 
   ALL_PRIMARY_SYMTABS (objfile, s)
   {
-    bv = BLOCKVECTOR (s);
+    bv = SYMTAB_BLOCKVECTOR (s);
     b = BLOCKVECTOR_BLOCK (bv, GLOBAL_BLOCK);
 
     if (BLOCK_START (b) <= pc
@@ -2316,8 +2316,8 @@ find_pc_sect_line (CORE_ADDR pc, struct obj_section *section, int notcurrent)
       return val;
     }
 
-  bv = BLOCKVECTOR (s);
-  objfile = s->objfile;
+  bv = SYMTAB_BLOCKVECTOR (s);
+  objfile = SYMTAB_OBJFILE (s);
 
   /* Look at all the symtabs that share this blockvector.
      They all have the same apriori range, that we found was right;
@@ -2325,11 +2325,11 @@ find_pc_sect_line (CORE_ADDR pc, struct obj_section *section, int notcurrent)
 
   ALL_OBJFILE_SYMTABS (objfile, s)
     {
-      if (BLOCKVECTOR (s) != bv)
+      if (SYMTAB_BLOCKVECTOR (s) != bv)
 	continue;
 
       /* Find the best line in this symtab.  */
-      l = LINETABLE (s);
+      l = SYMTAB_LINETABLE (s);
       if (!l)
 	continue;
       len = l->nitems;
@@ -2431,6 +2431,19 @@ find_pc_line (CORE_ADDR pc, int notcurrent)
     pc = overlay_mapped_address (pc, section);
   return find_pc_sect_line (pc, section, notcurrent);
 }
+
+/* See symtab.h.  */
+
+struct symtab *
+find_pc_line_symtab (CORE_ADDR pc)
+{
+  struct symtab_and_line sal;
+
+  /* This always passes zero for NOTCURRENT to find_pc_line.
+     There are currently no callers that ever pass non-zero.  */
+  sal = find_pc_line (pc, 0);
+  return sal.symtab;
+}
 
 /* Find line number LINE in any symtab whose name is the same as
    SYMTAB.
@@ -2456,7 +2469,7 @@ find_line_symtab (struct symtab *symtab, int line,
   struct symtab *best_symtab;
 
   /* First try looking it up in the given symtab.  */
-  best_linetable = LINETABLE (symtab);
+  best_linetable = SYMTAB_LINETABLE (symtab);
   best_symtab = symtab;
   best_index = find_line_common (best_linetable, line, &exact, 0);
   if (best_index < 0 || !exact)
@@ -2498,7 +2511,7 @@ find_line_symtab (struct symtab *symtab, int line,
 	if (FILENAME_CMP (symtab_to_fullname (symtab),
 			  symtab_to_fullname (s)) != 0)
 	  continue;	
-	l = LINETABLE (s);
+	l = SYMTAB_LINETABLE (s);
 	ind = find_line_common (l, line, &exact, 0);
 	if (ind >= 0)
 	  {
@@ -2548,13 +2561,14 @@ find_pcs_for_symtab_line (struct symtab *symtab, int line,
       int was_exact;
       int idx;
 
-      idx = find_line_common (LINETABLE (symtab), line, &was_exact, start);
+      idx = find_line_common (SYMTAB_LINETABLE (symtab), line, &was_exact,
+			      start);
       if (idx < 0)
 	break;
 
       if (!was_exact)
 	{
-	  struct linetable_entry *item = &LINETABLE (symtab)->item[idx];
+	  struct linetable_entry *item = &SYMTAB_LINETABLE (symtab)->item[idx];
 
 	  if (*best_item == NULL || item->line < (*best_item)->line)
 	    *best_item = item;
@@ -2562,7 +2576,8 @@ find_pcs_for_symtab_line (struct symtab *symtab, int line,
 	  break;
 	}
 
-      VEC_safe_push (CORE_ADDR, result, LINETABLE (symtab)->item[idx].pc);
+      VEC_safe_push (CORE_ADDR, result,
+		     SYMTAB_LINETABLE (symtab)->item[idx].pc);
       start = idx + 1;
     }
 
@@ -2587,7 +2602,7 @@ find_line_pc (struct symtab *symtab, int line, CORE_ADDR *pc)
   symtab = find_line_symtab (symtab, line, &ind, NULL);
   if (symtab != NULL)
     {
-      l = LINETABLE (symtab);
+      l = SYMTAB_LINETABLE (symtab);
       *pc = l->item[ind].pc;
       return 1;
     }
@@ -2741,7 +2756,7 @@ skip_prologue_using_lineinfo (CORE_ADDR func_addr, struct symtab *symtab)
   int i;
 
   /* Give up if this symbol has no lineinfo table.  */
-  l = LINETABLE (symtab);
+  l = SYMTAB_LINETABLE (symtab);
   if (l == NULL)
     return func_addr;
 
@@ -2802,7 +2817,7 @@ skip_prologue_sal (struct symtab_and_line *sal)
       pc = BLOCK_START (SYMBOL_BLOCK_VALUE (sym));
       section = SYMBOL_OBJ_SECTION (SYMBOL_OBJFILE (sym), sym);
       name = SYMBOL_LINKAGE_NAME (sym);
-      objfile = SYMBOL_SYMTAB (sym)->objfile;
+      objfile = SYMBOL_OBJFILE (sym);
     }
   else
     {
@@ -2982,7 +2997,7 @@ skip_prologue_using_sal (struct gdbarch *gdbarch, CORE_ADDR func_addr)
 	 do this.  */
       if (prologue_sal.symtab->language != language_asm)
 	{
-	  struct linetable *linetable = LINETABLE (prologue_sal.symtab);
+	  struct linetable *linetable = SYMTAB_LINETABLE (prologue_sal.symtab);
 	  int idx = 0;
 
 	  /* Skip any earlier lines, and any end-of-sequence marker
@@ -3696,7 +3711,7 @@ search_symbols (const char *regexp, enum search_domain kind,
 
   ALL_PRIMARY_SYMTABS (objfile, s)
   {
-    bv = BLOCKVECTOR (s);
+    bv = SYMTAB_BLOCKVECTOR (s);
     for (i = GLOBAL_BLOCK; i <= STATIC_BLOCK; i++)
       {
 	b = BLOCKVECTOR_BLOCK (bv, i);
@@ -4503,7 +4518,7 @@ default_make_symbol_completion_list_break_on (const char *text,
   ALL_PRIMARY_SYMTABS (objfile, s)
   {
     QUIT;
-    b = BLOCKVECTOR_BLOCK (BLOCKVECTOR (s), GLOBAL_BLOCK);
+    b = BLOCKVECTOR_BLOCK (SYMTAB_BLOCKVECTOR (s), GLOBAL_BLOCK);
     ALL_BLOCK_SYMBOLS (b, iter, sym)
       {
 	if (code == TYPE_CODE_UNDEF
@@ -4516,7 +4531,7 @@ default_make_symbol_completion_list_break_on (const char *text,
   ALL_PRIMARY_SYMTABS (objfile, s)
   {
     QUIT;
-    b = BLOCKVECTOR_BLOCK (BLOCKVECTOR (s), STATIC_BLOCK);
+    b = BLOCKVECTOR_BLOCK (SYMTAB_BLOCKVECTOR (s), STATIC_BLOCK);
     ALL_BLOCK_SYMBOLS (b, iter, sym)
       {
 	if (code == TYPE_CODE_UNDEF
@@ -4680,13 +4695,13 @@ make_file_symbol_completion_list (const char *text, const char *word,
   /* Go through this symtab and check the externs and statics for
      symbols which match.  */
 
-  b = BLOCKVECTOR_BLOCK (BLOCKVECTOR (s), GLOBAL_BLOCK);
+  b = BLOCKVECTOR_BLOCK (SYMTAB_BLOCKVECTOR (s), GLOBAL_BLOCK);
   ALL_BLOCK_SYMBOLS (b, iter, sym)
     {
       COMPLETION_LIST_ADD_SYMBOL (sym, sym_text, sym_text_len, text, word);
     }
 
-  b = BLOCKVECTOR_BLOCK (BLOCKVECTOR (s), STATIC_BLOCK);
+  b = BLOCKVECTOR_BLOCK (SYMTAB_BLOCKVECTOR (s), STATIC_BLOCK);
   ALL_BLOCK_SYMBOLS (b, iter, sym)
     {
       COMPLETION_LIST_ADD_SYMBOL (sym, sym_text, sym_text_len, text, word);
