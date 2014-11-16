@@ -580,7 +580,7 @@ CGEN_CPU_SEM = /sem/
 CGEN_CPU_SEMSW = /semsw/
 
 CGEN_FLAGS_TO_PASS = \
-	CGEN='$(CGEN)' \
+	CGEN="$(CGEN)" \
 	CGENFLAGS="$(CGENFLAGS)"
 
 # We store the generated files in the source directory until we decide to
@@ -588,37 +588,37 @@ CGEN_FLAGS_TO_PASS = \
 
 cgen-arch: force
 	$(SHELL) $(srccom)/cgen.sh arch $(srcdir) \
-		$(CGEN) $(CGENDIR) "$(CGENFLAGS)" \
+		"$(CGEN)" $(CGENDIR) "$(CGENFLAGS)" \
 		$(arch) "$(FLAGS)" ignored "$(isa)" $(mach) ignored \
 		$(archfile) ignored
 
 cgen-cpu: force
 	$(SHELL) $(srccom)/cgen.sh cpu $(srcdir) \
-		$(CGEN) $(CGENDIR) "$(CGENFLAGS)" \
+		"$(CGEN)" $(CGENDIR) "$(CGENFLAGS)" \
 		$(arch) "$(FLAGS)" $(cpu) "$(isa)" $(mach) "$(SUFFIX)" \
 		$(archfile) "$(EXTRAFILES)"
 
 cgen-defs: force
 	$(SHELL) $(srccom)/cgen.sh defs $(srcdir) \
-		$(CGEN) $(CGENDIR) "$(CGENFLAGS)" \
+		"$(CGEN)" $(CGENDIR) "$(CGENFLAGS)" \
 		$(arch) "$(FLAGS)" $(cpu) "$(isa)" $(mach) "$(SUFFIX)" \
 		$(archfile) ignored
 
 cgen-decode: force
 	$(SHELL) $(srccom)/cgen.sh decode $(srcdir) \
-		$(CGEN) $(CGENDIR) "$(CGENFLAGS)" \
+		"$(CGEN)" $(CGENDIR) "$(CGENFLAGS)" \
 		$(arch) "$(FLAGS)" $(cpu) "$(isa)" $(mach) "$(SUFFIX)" \
 		$(archfile) "$(EXTRAFILES)"
 
 cgen-cpu-decode: force
 	$(SHELL) $(srccom)/cgen.sh cpu-decode $(srcdir) \
-		$(CGEN) $(CGENDIR) "$(CGENFLAGS)" \
+		"$(CGEN)" $(CGENDIR) "$(CGENFLAGS)" \
 		$(arch) "$(FLAGS)" $(cpu) "$(isa)" $(mach) "$(SUFFIX)" \
 		$(archfile) "$(EXTRAFILES)"
 
 cgen-desc: force
 	$(SHELL) $(srccom)/cgen.sh desc $(srcdir) \
-		$(CGEN) $(CGENDIR) "$(CGENFLAGS)" \
+		"$(CGEN)" $(CGENDIR) "$(CGENFLAGS)" \
 		$(arch) "$(FLAGS)" $(cpu) "$(isa)" $(mach) "$(SUFFIX)" \
 		$(archfile) ignored $(opcfile)
 
