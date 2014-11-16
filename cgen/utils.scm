@@ -1310,7 +1310,7 @@
   (cons "\
 THIS FILE IS MACHINE GENERATED WITH CGEN.
 
-Copyright 1996-2010 Free Software Foundation, Inc.
+Copyright 1996-2014 Free Software Foundation, Inc.
 "
 	"\
    This file is free software; you can redistribute it and/or modify
@@ -1324,8 +1324,7 @@ Copyright 1996-2010 Free Software Foundation, Inc.
    License for more details.
 
    You should have received a copy of the GNU General Public License along
-   with this program; if not, write to the Free Software Foundation, Inc.,
-   51 Franklin Street - Fifth Floor, Boston, MA 02110-1301, USA.
+   with this program; if not, see <http://www.gnu.org/licenses/>.
 "
 ))
 
