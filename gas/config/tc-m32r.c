@@ -592,7 +592,9 @@ debug_sym (int ignore ATTRIBUTE_UNUSED)
       lnk->symbol = symbolP;
       lnk->next = debug_sym_link;
       debug_sym_link = lnk;
+#ifdef OBJ_ELF
       symbol_get_obj (symbolP)->local = 1;
+#endif
     }
 
   *end_name = delim;
@@ -672,6 +674,11 @@ m32r_target_format (void)
     return "elf32-m32r-linux";
   else
     return "elf32-m32rle-linux";
+#elif defined(OBJ_COFF)
+  if (target_big_endian)
+    return "coff-m32r";
+  else
+    return "coff-m32rle";
 #else
   if (target_big_endian)
     return "elf32-m32r";
@@ -1504,7 +1511,8 @@ m32r_scomm (int ignore ATTRIBUTE_UNUSED)
       return;
     }
 
-  /* The third argument to .scomm is the alignment.  */
+#ifdef OBJ_ELF
+  /* The third argument to .scomm is the alignment (ELF only).  */
   if (*input_line_pointer != ',')
     align = 8;
   else
@@ -1517,6 +1525,9 @@ m32r_scomm (int ignore ATTRIBUTE_UNUSED)
 	  align = 8;
 	}
     }
+#else
+  align = 8;
+#endif
 
   /* Convert to a power of 2 alignment.  */
   if (align)
@@ -1558,6 +1569,7 @@ m32r_scomm (int ignore ATTRIBUTE_UNUSED)
       return;
     }
 
+#ifdef OBJ_ELF
   if (symbol_get_obj (symbolP)->local)
     {
       segT old_sec = now_seg;
@@ -1584,9 +1596,13 @@ m32r_scomm (int ignore ATTRIBUTE_UNUSED)
       subseg_set (old_sec, old_subsec);
     }
   else
+#endif /* OBJ_ELF */
     {
       S_SET_VALUE (symbolP, (valueT) size);
+#ifdef OBJ_ELF
       S_SET_ALIGN (symbolP, align2);
+      /* FIXME: S_SET_SIZE (symbolP, size); ??? */
+#endif
       S_SET_EXTERNAL (symbolP);
       S_SET_SEGMENT (symbolP, &scom_section);
     }
@@ -1841,6 +1857,9 @@ md_convert_frag (bfd *abfd ATTRIBUTE_UNUSED,
 long
 md_pcrel_from_section (fixS *fixP, segT sec)
 {
+#ifdef OBJ_ELF
+  /* FIXME: This may be correct, but I'm skeptical.  /dje
+     Comments explaining Why Things Are The Way They Are are most welcome.  */
   if (fixP->fx_addsy != (symbolS *) NULL
       && (! S_IS_DEFINED (fixP->fx_addsy)
 	  || S_GET_SEGMENT (fixP->fx_addsy) != sec
@@ -1859,6 +1878,18 @@ md_pcrel_from_section (fixS *fixP, segT sec)
     }
 
   return (fixP->fx_frag->fr_address + fixP->fx_where) & -4L;
+#else
+  if (fixP->fx_addsy != (symbolS *) NULL
+      && (! S_IS_DEFINED (fixP->fx_addsy)
+	  || S_GET_SEGMENT (fixP->fx_addsy) != sec))
+    {
+      /* The symbol is undefined (or is defined but not in this section).
+	 Let the linker figure it out.  */
+      return 0;
+    }
+
+  return (fixP->fx_frag->fr_address + fixP->fx_where) & -4L;
+#endif
 }
 
 /* Return the bfd reloc type for OPERAND of INSN at fixup FIXP.
@@ -2116,8 +2147,10 @@ md_atof (int type, char *litP, int *sizeP)
   return ieee_md_atof (type, litP, sizeP, target_big_endian);
 }
 
+#if defined(OBJ_ELF) || defined(OBJ_COFF)
+
 void
-m32r_elf_section_change_hook (void)
+m32r_section_change_hook (void)
 {
   /* If we have reached the end of a section and we have just emitted a
      16 bit insn, then emit a nop to make sure that the section ends on
@@ -2126,6 +2159,8 @@ m32r_elf_section_change_hook (void)
   if (prev_insn.insn || seen_relaxable_p)
     (void) m32r_fill_insn (0);
 }
+
+#endif
 
 /* Return true if can adjust the reloc to be relative to its section
    (such as .data) instead of relative to some symbol.  */
@@ -2182,6 +2217,8 @@ m32r_fix_adjustable (fixS *fixP)
   return 1;
 }
 
+#ifdef OBJ_ELF
+
 void
 m32r_elf_final_processing (void)
 {
@@ -2189,6 +2226,8 @@ m32r_elf_final_processing (void)
     m32r_flags |= E_M32R_HAS_PARALLEL;
   elf_elfheader (stdoutput)->e_flags |= m32r_flags;
 }
+
+#endif
 
 /* Translate internal representation of relocation info to BFD target
    format. */
@@ -2225,7 +2264,7 @@ printf("%s",bfd_get_reloc_code_name(code));
       switch (code)
         {
         case BFD_RELOC_M32R_26_PCREL:
-            code = BFD_RELOC_M32R_26_PLTREL;
+	  code = BFD_RELOC_M32R_26_PLTREL;
           break;
 
         case BFD_RELOC_M32R_24:

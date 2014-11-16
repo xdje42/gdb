@@ -26,6 +26,12 @@ This file is part of the GNU simulators.
 
 #define TARGET_BIG_ENDIAN 1
 
+#define WI  SI
+#define UWI USI
+#define AI  USI
+
+#define IAI USI
+
 /* Enum declaration for model types.  */
 typedef enum model_type {
   MODEL_M32R_D, MODEL_TEST, MODEL_M32RX, MODEL_M32R2

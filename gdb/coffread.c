@@ -1084,27 +1084,28 @@ coff_symtab_read (long symtab_offset, unsigned int nsyms,
 	      /* { main_aux.x_sym.x_misc.x_lnsz.x_lnno
 	         contains number of lines to '}' */
 
-	      if (context_stack_depth <= 0)
-		{	/* We attempted to pop an empty context stack.  */
-		  complaint (&symfile_complaints,
-			     _("`.ef' symbol without matching `.bf' "
-			       "symbol ignored starting at symnum %d"),
-			     cs->c_symnum);
-		  within_function = 0;
-		  break;
-		}
+	      /* This could happen if a .bf was followed by a .eb.
+		 We already know we're within a function.
+		 TODO(dje): What are the rules for nesting of
+		 blocks/functions?  E.g. Does coff support nested functions?
+		 We know we're in a function and unmatched .eb directives
+		 are ignored.  Thus this assert seems safe.  */
+	      gdb_assert (context_stack_depth > 0);
 
+	      /* The block depth should be zero now.
+		 If may not be if the compiler didn't emit a .eb symbol
+		 for every .bb symbol.  */
 	      new = pop_context ();
-	      /* Stack must be empty now.  */
-	      if (context_stack_depth > 0 || new == NULL)
+	      if (new->depth != 0)
 		{
 		  complaint (&symfile_complaints,
-			     _("Unmatched .ef symbol(s) ignored "
-			       "starting at symnum %d"),
+			     _("Unmatched .bb symbol(s) detected "
+			       "at symnum %d"),
 			     cs->c_symnum);
-		  within_function = 0;
-		  break;
+		  while (new->depth > 0 && context_stack_depth > 0)
+		    new = pop_context ();
 		}
+	      gdb_assert (new->depth == 0);
 	      if (cs->c_naux != 1)
 		{
 		  complaint (&symfile_complaints,
@@ -1123,13 +1124,14 @@ coff_symtab_read (long symtab_offset, unsigned int nsyms,
 	         it is also the line number of all the statements and
 	         of the closing '}', and for which we do not have any
 	         other statement-line-number.  */
-	      if (fcn_last_line == 1)
-		record_line (current_subfile, fcn_first_line,
-			     gdbarch_addr_bits_remove (gdbarch,
-						       fcn_first_line_addr));
-	      else
-		enter_linenos (fcn_line_ptr, fcn_first_line,
-			       fcn_last_line, objfile);
+	      record_line (current_subfile, fcn_first_line,
+			   gdbarch_addr_bits_remove (gdbarch,
+						     fcn_first_line_addr));
+	      if (fcn_last_line > 1)
+		{
+		  enter_linenos (fcn_line_ptr, fcn_first_line,
+				 fcn_last_line, objfile);
+		}
 
 	      finish_block (new->name, &local_symbols,
 			    new->old_blocks, new->start_addr,
@@ -1149,10 +1151,13 @@ coff_symtab_read (long symtab_offset, unsigned int nsyms,
 	      tmpaddr = cs->c_value;
 	      tmpaddr += ANOFFSET (objfile->section_offsets,
 				   SECT_OFF_TEXT (objfile));
+	      /* Invariant: The depth we push here is always > 0.  */
 	      push_context (++depth, tmpaddr);
 	    }
 	  else if (strcmp (cs->c_name, ".eb") == 0)
 	    {
+	      struct context_stack *current_context;
+
 	      if (context_stack_depth <= 0)
 		{	/* We attempted to pop an empty context stack.  */
 		  complaint (&symfile_complaints,
@@ -1162,8 +1167,8 @@ coff_symtab_read (long symtab_offset, unsigned int nsyms,
 		  break;
 		}
 
-	      new = pop_context ();
-	      if (depth-- != new->depth)
+	      current_context = get_context ();
+	      if (depth != current_context->depth || depth == 0)
 		{
 		  complaint (&symfile_complaints,
 			     _("Mismatched .eb symbol ignored "
@@ -1171,6 +1176,8 @@ coff_symtab_read (long symtab_offset, unsigned int nsyms,
 			     symnum);
 		  break;
 		}
+	      new = pop_context ();
+	      --depth;
 	      if (local_symbols && context_stack_depth > 0)
 		{
 		  tmpaddr =

@@ -35,6 +35,7 @@ coff-h8500.c
 coff-i386.c
 coff-i860.c
 coff-i960.c
+coff-m32r.c
 coff-m68k.c
 coff-m88k.c
 coff-mips.c

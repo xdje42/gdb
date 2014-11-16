@@ -276,6 +276,7 @@ BFD32_BACKENDS = \
 	coff-i386.lo \
 	coff-i860.lo \
 	coff-i960.lo \
+	coff-m32r.lo \
 	coff-m68k.lo \
 	coff-m88k.lo \
 	coff-mips.lo \
@@ -463,6 +464,7 @@ BFD32_BACKENDS_CFILES = \
 	coff-i386.c \
 	coff-i860.c \
 	coff-i960.c \
+	coff-m32r.c \
 	coff-m68k.c \
 	coff-m88k.c \
 	coff-mips.c \

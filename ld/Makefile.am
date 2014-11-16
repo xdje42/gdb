@@ -321,6 +321,7 @@ ALL_EMULATION_SOURCES = \
 	ei386pe.c \
 	ei386pe_posix.c \
 	elnk960.c \
+	em32rcoff.c \
 	em32relf.c \
 	em32relf_linux.c \
 	em32rlelf.c \
@@ -1427,6 +1428,10 @@ ei386pep.c: $(srcdir)/emulparams/i386pep.sh \
 
 elnk960.c: $(srcdir)/emulparams/lnk960.sh \
   $(srcdir)/emultempl/lnk960.em $(srcdir)/scripttempl/i960.sc ${GEN_DEPENDS}
+
+em32rcoff.c: $(srcdir)/emulparams/m32rcoff.sh \
+  $(srcdir)/emultempl/m32rcoff.em $(srcdir)/scripttempl/m32rcoff.sc ${GEN_DEPENDS}
+#	${GENSCRIPTS} m32rcoff "$(tdir_m32rcoff)"
 
 em32relf.c: $(srcdir)/emulparams/m32relf.sh \
   $(ELF_DEPS) $(srcdir)/scripttempl/elf.sc ${GEN_DEPENDS}

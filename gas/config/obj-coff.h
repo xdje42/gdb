@@ -68,6 +68,10 @@
 #endif
 #endif
 
+#ifdef TC_M32R
+#include "coff/m32r.h"
+#endif
+
 #ifdef TC_M68K
 #include "coff/m68k.h"
 #ifndef TARGET_FORMAT

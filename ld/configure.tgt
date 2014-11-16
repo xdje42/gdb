@@ -381,6 +381,7 @@ lm32-*-*)               targ_emul=elf32lm32 ; targ_extra_emuls="elf32lm32fd"
 m32c-*-elf | m32c-*-rtems*)
 			targ_emul=elf32m32c
 			;;
+m32r*-*-coff)		targ_emul=m32rcoff ;;
 m32r*le-*-elf*)         targ_emul=m32rlelf ;;
 m32r*-*-elf* | m32r*-*-rtems*)
 			targ_emul=m32relf ;;

@@ -43,7 +43,7 @@ long md_pcrel_from_section (struct fix *, segT);
 /* Permit temporary numeric labels.  */
 #define LOCAL_LABELS_FB 1
 
-#define DIFF_EXPR_OK		/* .-foo gets turned into PC relative relocs.  */
+#define DIFF_EXPR_OK	/* .-foo gets turned into PC relative relocs.  */
 
 /* We don't need to handle .word strangely.  */
 #define WORKING_DOT_WORD
@@ -103,12 +103,14 @@ int m32r_fill_insn (int);
 #define TC_START_LABEL(ch, s, ptr)	(ch == ':' && m32r_fill_insn (0))
 
 #define md_cleanup()               m32r_fill_insn (1)
-#define md_elf_section_change_hook m32r_elf_section_change_hook
-extern void m32r_elf_section_change_hook (void);
+
+#define md_elf_section_change_hook m32r_section_change_hook
+#define md_coff_section_change_hook m32r_section_change_hook
+extern void m32r_section_change_hook (void);
 
 #define md_flush_pending_output()       m32r_flush_pending_output ()
 extern void m32r_flush_pending_output (void);
-                                                                                  
+
 #define elf_tc_final_processing 	m32r_elf_final_processing
 extern void m32r_elf_final_processing (void);
 

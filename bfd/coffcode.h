@@ -2462,6 +2462,13 @@ coff_set_arch_mach_hook (bfd *abfd, void * filehdr)
       break;
 #endif
 
+#ifdef M32R_MAGIC_BIG
+    case M32R_MAGIC_BIG:
+    case M32R_MAGIC_LITTLE:
+      arch = bfd_arch_m32r;
+      break;
+#endif
+
     default:			/* Unreadable input file type.  */
       arch = bfd_arch_obscure;
       break;
@@ -3067,6 +3074,15 @@ coff_set_flags (bfd * abfd,
 #ifdef W65MAGIC
     case bfd_arch_w65:
       *magicp = W65MAGIC;
+      return TRUE;
+#endif
+
+#ifdef M32R_MAGIC_BIG
+    case bfd_arch_m32r:
+      if (bfd_big_endian (abfd))
+	*magicp = M32R_MAGIC_BIG;
+      else
+	*magicp = M32R_MAGIC_LITTLE;
       return TRUE;
 #endif
 
@@ -5993,7 +6009,7 @@ const bfd_target VAR =							\
   (HAS_RELOC | EXEC_P | HAS_LINENO | HAS_DEBUG |			\
    HAS_SYMS | HAS_LOCALS | WP_TEXT | EXTRA_O_FLAGS),			\
   /* section flags */							\
-  (SEC_HAS_CONTENTS | SEC_ALLOC | SEC_LOAD | SEC_RELOC | EXTRA_S_FLAGS),\
+  (SEC_HAS_CONTENTS | SEC_ALLOC | SEC_LOAD | SEC_RELOC | SEC_READONLY | SEC_CODE | SEC_DATA | SEC_EXCLUDE | SEC_NEVER_LOAD | EXTRA_S_FLAGS),\
   UNDER,			/* Leading symbol underscore.  */	\
   '/',				/* AR_pad_char.  */			\
   15,				/* AR_max_namelen.  */			\
@@ -6044,7 +6060,7 @@ const bfd_target VAR =							\
   (HAS_RELOC | EXEC_P | HAS_LINENO | HAS_DEBUG |			\
    HAS_SYMS | HAS_LOCALS | WP_TEXT | EXTRA_O_FLAGS),			\
   /* section flags */							\
-  (SEC_HAS_CONTENTS | SEC_ALLOC | SEC_LOAD | SEC_RELOC | EXTRA_S_FLAGS),\
+  (SEC_HAS_CONTENTS | SEC_ALLOC | SEC_LOAD | SEC_RELOC | SEC_READONLY | SEC_CODE | SEC_DATA | SEC_EXCLUDE | SEC_NEVER_LOAD | EXTRA_S_FLAGS),\
   UNDER,			/* Leading symbol underscore.  */	\
   '/',				/* AR_pad_char.  */			\
   15,				/* AR_max_namelen.  */			\
@@ -6095,7 +6111,7 @@ const bfd_target VAR =							\
   (HAS_RELOC | EXEC_P | HAS_LINENO | HAS_DEBUG |			\
    HAS_SYMS | HAS_LOCALS | WP_TEXT | EXTRA_O_FLAGS),			\
 	/* section flags */						\
-  (SEC_HAS_CONTENTS | SEC_ALLOC | SEC_LOAD | SEC_RELOC | EXTRA_S_FLAGS),\
+  (SEC_HAS_CONTENTS | SEC_ALLOC | SEC_LOAD | SEC_RELOC | SEC_READONLY | SEC_CODE | SEC_DATA | SEC_EXCLUDE | SEC_NEVER_LOAD | EXTRA_S_FLAGS),\
   UNDER,			/* Leading symbol underscore.  */	\
   '/',				/* AR_pad_char.  */			\
   15,				/* AR_max_namelen.  */			\

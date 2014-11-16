@@ -12540,6 +12540,7 @@ esac
 cgen_cpu_prefix=""
 if test $using_cgen = yes ; then
   case ${target_cpu} in
+    m32rle) cgen_cpu_prefix=m32r ;;
     or1knd)
        cgen_cpu_prefix=or1k ;;
     *) cgen_cpu_prefix=${target_cpu} ;;

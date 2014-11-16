@@ -454,7 +454,7 @@ coff_add_linesym (symbolS *sym)
       coffsymbol (symbol_get_bfdsym (current_lineno_sym))->lineno =
 	(alent *) line_nos;
       coff_n_line_nos++;
-      line_nos = 0;
+      line_nos = NULL;
     }
   current_lineno_sym = sym;
 }
@@ -572,6 +572,16 @@ obj_coff_ident (int ignore ATTRIBUTE_UNUSED)
   subseg_set (current_seg, current_subseg);
 }
 
+static void
+obj_coff_data (int ignore ATTRIBUTE_UNUSED)
+{
+  s_data (ignore);
+
+#ifdef md_coff_section_change_hook
+  md_coff_section_change_hook ();
+#endif
+}
+
 /* Handle .def directives.
 
    One might ask : why can't we symbol_new if the symbol does not
@@ -581,7 +591,6 @@ obj_coff_ident (int ignore ATTRIBUTE_UNUSED)
    a C_EFCN. And a second reason is that the code is more clear this
    way. (at least I think it is :-).  */
 
-#define SKIP_SEMI_COLON()	while (*input_line_pointer++ != ';')
 #define SKIP_WHITESPACES()	while (*input_line_pointer == ' ' || \
 				       *input_line_pointer == '\t')  \
                                   input_line_pointer++;
@@ -886,10 +895,11 @@ obj_coff_dim (int ignore ATTRIBUTE_UNUSED)
 	  break;
 
 	default:
-	  as_warn (_("badly formed .dim directive ignored"));
+	  /* Is the character the line separator char?  */
+	  if (strchr (line_separator_chars, *input_line_pointer) == NULL)
+	    as_warn (_("badly formed .dim directive ignored"));
 	  /* Fall through.  */
 	case '\n':
-	case ';':
 	  d_index = DIMNUM;
 	  break;
 	}
@@ -991,6 +1001,16 @@ obj_coff_tag (int ignore ATTRIBUTE_UNUSED)
   *input_line_pointer = name_end;
 
   demand_empty_rest_of_line ();
+}
+
+static void
+obj_coff_text (int ignore ATTRIBUTE_UNUSED)
+{
+  s_text (ignore);
+
+#ifdef md_coff_section_change_hook
+  md_coff_section_change_hook ();
+#endif
 }
 
 static void
@@ -1624,6 +1644,7 @@ obj_coff_section (int ignore ATTRIBUTE_UNUSED)
 		  /* Fall through.  */
 		case 'd':
 		  /* Data section.  */
+		  flags |= SEC_ALLOC;
 		  flags |= SEC_DATA;
 		  if (! load_removed)
 		    flags |= SEC_LOAD;
@@ -1632,6 +1653,7 @@ obj_coff_section (int ignore ATTRIBUTE_UNUSED)
 
 		case 'w':
 		  /* Writable section.  */
+		  flags |= SEC_ALLOC;
 		  flags &=~ SEC_READONLY;
 		  readonly_removed = 1;
 		  break;
@@ -1649,6 +1671,7 @@ obj_coff_section (int ignore ATTRIBUTE_UNUSED)
 		     of a code section (eg "wxr") then set the SEC_CODE flag,
 		     otherwise set the SEC_DATA flag.  */
 		  flags |= (attr == 'x' || (flags & SEC_CODE) ? SEC_CODE : SEC_DATA);
+		  flags |= SEC_ALLOC;
 		  if (! load_removed)
 		    flags |= SEC_LOAD;
 		  /* Note - the READONLY flag is set here, even for the 'x'
@@ -1712,8 +1735,16 @@ obj_coff_section (int ignore ATTRIBUTE_UNUSED)
 			     | SEC_DATA | SEC_COFF_SHARED | SEC_NEVER_LOAD
 			     | SEC_COFF_NOREAD);
       if ((flags ^ oldflags) & matchflags)
-	as_warn (_("Ignoring changed section attributes for %s"), name);
+	{
+	  as_warn (_("Ignoring changed section attributes for %s"), name);
+	  as_warn (_("flags 0x%x, oldflags 0x%x, matchflags 0x%x"),
+		   (int) flags, (int) oldflags, (int) matchflags);
+	}
     }
+
+#ifdef md_coff_section_change_hook
+  md_coff_section_change_hook ();
+#endif
 
   demand_empty_rest_of_line ();
 }
@@ -1873,6 +1904,7 @@ const pseudo_typeS coff_pseudo_table[] =
   /* PE provides an enhanced version of .comm with alignment.  */
   {"comm", obj_coff_comm, 0},
 #endif /* TE_PE */
+  {"data", obj_coff_data, 0},
   {"def", obj_coff_def, 0},
   {"dim", obj_coff_dim, 0},
   {"endef", obj_coff_endef, 0},
@@ -1887,6 +1919,7 @@ const pseudo_typeS coff_pseudo_table[] =
   /* FIXME: We ignore the MRI short attribute.  */
   {"size", obj_coff_size, 0},
   {"tag", obj_coff_tag, 0},
+  {"text", obj_coff_text, 0},
   {"type", obj_coff_type, 0},
   {"val", obj_coff_val, 0},
   {"version", s_ignore, 0},

@@ -400,7 +400,7 @@ XSTORMY16_DEPS =
 endif
 
 run-cgen:
-	$(SHELL) $(srcdir)/cgen.sh opcodes $(srcdir) $(CGEN) \
+	$(SHELL) $(srcdir)/cgen.sh opcodes $(srcdir) "$(CGEN)" \
 	  $(CGENDIR) "$(CGENFLAGS)" $(arch) $(prefix) $(archfile) $(opcfile) \
 	  "$(options)" "$(extrafiles)"
 	touch stamp-${prefix}

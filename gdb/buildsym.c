@@ -1470,6 +1470,15 @@ pop_context (void)
   return (&context_stack[--context_stack_depth]);
 }
 
+/* Return the current context.  */
+
+struct context_stack *
+get_context (void)
+{
+  gdb_assert (context_stack_depth > 0);
+  return &context_stack[context_stack_depth];
+}
+
 
 
 /* Compute a small integer hash code for the given name.  */
