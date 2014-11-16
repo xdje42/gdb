@@ -28,6 +28,20 @@ shift ; archfile=$9
 shift ; extrafiles=$9
 shift ; opcfile=$9
 
+# Guile 1.8.8 has problems with relative paths.  It took ../../foo/../bar
+# and used it twice as ../../foo/../bar/../../foo/../bar.  Ugh.
+# Cope by using absolute paths here.
+
+case ${srcdir} in
+/*) ;;
+*) srcdir=`pwd`/$srcdir ;;
+esac
+
+case ${cgendir} in
+/*) ;;
+*) cgendir=`pwd`/$cgendir ;;
+esac
+
 rootdir=${srcdir}/../..
 
 test -z "${opcfile}" && opcfile=/dev/null
