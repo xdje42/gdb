@@ -108,8 +108,10 @@ static const struct program_space_data *symbol_cache_key;
 
 /* The default symbol cache size.
    There is no extra cpu cost for large N (except when flushing the cache,
-   which is rare).  The value here is just a first attempt.  */
-#define DEFAULT_SYMBOL_CACHE_SIZE 4095
+   which is rare).  The value here is just a first attempt.  A better default
+   value may be higher or lower.  A prime number can make up for a bad hash
+   computation, so that's why the number is what it is.  */
+#define DEFAULT_SYMBOL_CACHE_SIZE 1021
 
 /* The maximum symbol cache size.
    There's no method to the decision of what value to use here, other than
@@ -1379,6 +1381,12 @@ symbol_cache_lookup (struct symbol_cache *cache,
     bsc = cache->global_symbols;
   else
     bsc = cache->static_symbols;
+  if (bsc == NULL)
+    {
+      *bsc_ptr = NULL;
+      *slot_ptr = NULL;
+      return NULL;
+    }
 
   hash = hash_symbol_entry (objfile_context, name, domain);
   slot = bsc->symbols + hash % bsc->size;
@@ -1428,6 +1436,8 @@ symbol_cache_mark_found (struct block_symbol_cache *bsc,
 			 struct symbol_cache_slot *slot,
 			 struct objfile *objfile, struct symbol *symbol)
 {
+  if (bsc == NULL)
+    return;
   if (slot->state != SYMBOL_SLOT_UNUSED)
     {
       ++bsc->collisions;
@@ -1446,6 +1456,8 @@ symbol_cache_mark_not_found (struct block_symbol_cache *bsc,
 			     struct objfile *objfile_context,
 			     const char *name, domain_enum domain)
 {
+  if (bsc == NULL)
+    return;
   if (slot->state != SYMBOL_SLOT_UNUSED)
     {
       ++bsc->collisions;
@@ -1468,6 +1480,12 @@ symbol_cache_flush (struct program_space *pspace)
 
   if (cache == NULL)
     return;
+  if (cache->global_symbols == NULL)
+    {
+      gdb_assert (symbol_cache_size == 0);
+      gdb_assert (cache->static_symbols == NULL);
+      return;
+    }
 
   /* If the cache is untouched since the last flush, early exit.
      This is important for performance during the startup of a program linked
@@ -1503,6 +1521,12 @@ static void
 symbol_cache_dump (const struct symbol_cache *cache)
 {
   int pass;
+
+  if (cache->global_symbols == NULL)
+    {
+      printf_filtered ("  <disabled>\n");
+      return;
+    }
 
   for (pass = 0; pass < 2; ++pass)
     {
@@ -1560,7 +1584,7 @@ maintenance_print_symbol_cache (char *args, int from_tty)
       /* If the cache hasn't been created yet, avoid creating one.  */
       cache = program_space_data (pspace, symbol_cache_key);
       if (cache == NULL)
-	printf_filtered (" <empty>\n");
+	printf_filtered ("  <empty>\n");
       else
 	symbol_cache_dump (cache);
     }
@@ -1585,6 +1609,12 @@ static void
 symbol_cache_stats (struct symbol_cache *cache)
 {
   int pass;
+
+  if (cache->global_symbols == NULL)
+    {
+      printf_filtered ("  <disabled>\n");
+      return;
+    }
 
   for (pass = 0; pass < 2; ++pass)
     {
@@ -1625,7 +1655,7 @@ maintenance_print_symbol_cache_statistics (char *args, int from_tty)
       /* If the cache hasn't been created yet, avoid creating one.  */
       cache = program_space_data (pspace, symbol_cache_key);
       if (cache == NULL)
- 	printf_filtered (" empty, no stats available\n");
+ 	printf_filtered ("  empty, no stats available\n");
       else
 	symbol_cache_stats (cache);
     }
@@ -6083,7 +6113,8 @@ symbols in the symbol cache."),
 The size of the symbol cache.\n\
 If zero then the symbol cache is disabled."),
 			     set_symbol_cache_size_handler, NULL,
-			     &setlist, &showlist);
+			     &maintenance_set_cmdlist,
+			     &maintenance_show_cmdlist);
 
   add_cmd ("symbol-cache", class_maintenance, maintenance_print_symbol_cache,
 	   _("Dump the symbol cache for each program space."),
