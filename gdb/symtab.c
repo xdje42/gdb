@@ -1243,7 +1243,10 @@ resize_symbol_cache (struct symbol_cache *cache, unsigned int new_size)
   /* If there's no change in size, don't do anything.
      All caches have the same size, so we can just compare with the size
      of the global symbols cache.  */
-  if (new_size == cache->global_symbols->size)
+  if ((cache->global_symbols != NULL
+       && cache->global_symbols->size == new_size)
+      || (cache->global_symbols == NULL
+	  && new_size == 0))
     return;
 
   xfree (cache->global_symbols);
