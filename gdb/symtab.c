@@ -2608,8 +2608,8 @@ lookup_global_symbol (const char *name,
 		      const domain_enum domain)
 {
   struct symbol_cache *cache = get_symbol_cache (current_program_space);
-  struct symbol *sym = NULL;
-  struct objfile *objfile = NULL;
+  struct symbol *sym;
+  struct objfile *objfile;
   struct global_sym_lookup_data lookup_data;
   struct block_symbol_cache *bsc;
   struct symbol_cache_slot *slot;
@@ -2617,7 +2617,7 @@ lookup_global_symbol (const char *name,
   objfile = lookup_objfile_from_block (block);
 
   /* First see if we can find the symbol in the cache.
-     This works because we use the current objfile as part of the lookup.  */
+     This works because we use the current objfile to qualify the lookup.  */
   sym = symbol_cache_lookup (cache, objfile, GLOBAL_BLOCK, name, domain,
 			     &bsc, &slot);
   if (sym != NULL)
@@ -2629,25 +2629,26 @@ lookup_global_symbol (const char *name,
 
   /* Call library-specific lookup procedure.  */
   if (objfile != NULL)
+    sym = solib_global_lookup (objfile, name, domain);
+
+  /* If that didn't work go a global search (of global blocks, heh).  */
+  if (sym == NULL)
     {
-      sym = solib_global_lookup (objfile, name, domain);
-      if (sym != NULL)
-	return sym;
+      memset (&lookup_data, 0, sizeof (lookup_data));
+      lookup_data.name = name;
+      lookup_data.domain = domain;
+      gdbarch_iterate_over_objfiles_in_search_order
+	(objfile != NULL ? get_objfile_arch (objfile) : target_gdbarch (),
+	 lookup_symbol_global_iterator_cb, &lookup_data, objfile);
+      sym = lookup_data.result;
     }
 
-  memset (&lookup_data, 0, sizeof (lookup_data));
-  lookup_data.name = name;
-  lookup_data.domain = domain;
-  gdbarch_iterate_over_objfiles_in_search_order
-    (objfile != NULL ? get_objfile_arch (objfile) : target_gdbarch (),
-     lookup_symbol_global_iterator_cb, &lookup_data, objfile);
-
-  if (lookup_data.result != NULL)
-    symbol_cache_mark_found (bsc, slot, objfile, lookup_data.result);
+  if (sym != NULL)
+    symbol_cache_mark_found (bsc, slot, objfile, sym);
   else
     symbol_cache_mark_not_found (bsc, slot, objfile, name, domain);
 
-  return lookup_data.result;
+  return sym;
 }
 
 int
