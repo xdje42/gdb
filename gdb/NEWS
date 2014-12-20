@@ -103,8 +103,8 @@ set debug symbol-cache
 show debug symbol-cache
   Control display of debugging info regarding the symbol cache.
 
-set symbol-cache-size
-show symbol-cache-size
+maint set symbol-cache-size
+maint show symbol-cache-size
   Control the size of the symbol cache.
 
 * MI changes
