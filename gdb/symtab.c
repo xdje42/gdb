@@ -148,6 +148,25 @@ struct block_symbol_cache
   struct symbol_cache_slot
   {
     enum symbol_cache_slot_state state;
+
+    /* The objfile that was current when the symbol was looked up.
+       This is only needed for global blocks, but for simplicity's sake
+       we allocate the space for both.  If data shows the extra space used
+       for static blocks is a problem, we can split things up then.
+
+       Global blocks need cache lookup to include the objfile context because
+       we need to account for gdbarch_iterate_over_objfiles_in_search_order
+       which can traverse objfiles in, effectively, any order, depending on
+       the current objfile, thus affecting which symbol is found.  Normally,
+       only the current objfile is searched first, and then the rest are
+       searched in recorded order; but putting cache lookup inside
+       gdbarch_iterate_over_objfiles_in_search_order would be awkward.
+       Instead we just make the current objfile part of the context of
+       cache lookup.  This means we can record the same symbol multiple times,
+       each with a different "current objfile" that was in effect when the
+       lookup was saved in the cache, but cache space is pretty cheap.  */
+    const struct objfile *objfile_context;
+
     union
     {
       struct symbol *found;
@@ -186,6 +205,11 @@ unsigned int symbol_lookup_debug = 0;
 static unsigned int symbol_cache_debug = 0;
 
 /* The size of the cache is staged here.  */
+static unsigned int new_symbol_cache_size = DEFAULT_SYMBOL_CACHE_SIZE;
+
+/* The current value of the symbol cache size.
+   This is saved so that if the user enters a value too big we can restore
+   the original value from here.  */
 static unsigned int symbol_cache_size = DEFAULT_SYMBOL_CACHE_SIZE;
 
 /* Non-zero if a file may be known by two different basenames.
@@ -1141,14 +1165,14 @@ expand_symtab_containing_pc (CORE_ADDR pc, struct obj_section *section)
 /* Hash function for the symbol cache.  */
 
 static unsigned int
-hash_symbol_entry (const char *name, domain_enum domain)
+hash_symbol_entry (const struct objfile *objfile_context,
+		   const char *name, domain_enum domain)
 {
-  unsigned int hash = 0;
+  unsigned int hash = (uintptr_t) objfile_context;
 
   if (name != NULL)
     hash += htab_hash_string (name);
 
-  /* TODO(dje): Too simplistic?  */
   hash += domain;
 
   return hash;
@@ -1158,12 +1182,16 @@ hash_symbol_entry (const char *name, domain_enum domain)
 
 static int
 eq_symbol_entry (const struct symbol_cache_slot *slot,
+		 const struct objfile *objfile_context,
 		 const char *name, domain_enum domain)
 {
   const char *slot_name;
   domain_enum slot_domain;
 
   if (slot->state == SYMBOL_SLOT_UNUSED)
+    return 0;
+
+  if (slot->objfile_context != objfile_context)
     return 0;
 
   if (slot->state == SYMBOL_SLOT_NOT_FOUND)
@@ -1212,6 +1240,12 @@ symbol_cache_byte_size (unsigned int size)
 static void
 resize_symbol_cache (struct symbol_cache *cache, unsigned int new_size)
 {
+  /* If there's no change in size, don't do anything.
+     All caches have the same size, so we can just compare with the size
+     of the global symbols cache.  */
+  if (new_size == cache->global_symbols->size)
+    return;
+
   xfree (cache->global_symbols);
   xfree (cache->static_symbols);
 
@@ -1231,21 +1265,15 @@ resize_symbol_cache (struct symbol_cache *cache, unsigned int new_size)
     }
 }
 
-/* Return the symbol cache of PSPACE.
-   Create one if it doesn't exist yet.  */
+/* Make a symbol cache of size SIZE.  */
 
 static struct symbol_cache *
-get_symbol_cache (struct program_space *pspace)
+make_symbol_cache (unsigned int size)
 {
-  struct symbol_cache *cache = program_space_data (pspace, symbol_cache_key);
+  struct symbol_cache *cache;
 
-  if (cache == NULL)
-    {
-      cache = XCNEW (struct symbol_cache);
-      resize_symbol_cache (cache, symbol_cache_size);
-      set_program_space_data (pspace, symbol_cache_key, cache);
-    }
-
+  cache = XCNEW (struct symbol_cache);
+  resize_symbol_cache (cache, symbol_cache_size);
   return cache;
 }
 
@@ -1257,6 +1285,23 @@ free_symbol_cache (struct symbol_cache *cache)
   xfree (cache->global_symbols);
   xfree (cache->static_symbols);
   xfree (cache);
+}
+
+/* Return the symbol cache of PSPACE.
+   Create one if it doesn't exist yet.  */
+
+static struct symbol_cache *
+get_symbol_cache (struct program_space *pspace)
+{
+  struct symbol_cache *cache = program_space_data (pspace, symbol_cache_key);
+
+  if (cache == NULL)
+    {
+      cache = make_symbol_cache (symbol_cache_size);
+      set_program_space_data (pspace, symbol_cache_key, cache);
+    }
+
+  return cache;
 }
 
 /* Delete the symbol cache of PSPACE.
@@ -1275,22 +1320,16 @@ symbol_cache_cleanup (struct program_space *pspace, void *data)
 static void
 set_symbol_cache_size (unsigned int new_size)
 {
-  struct symbol_cache *cache
-    = program_space_data (current_program_space, symbol_cache_key);
   struct program_space *pspace;
-
-  /* If there's no change in size, don't do anything.
-     All caches have the same size, so we can just compare with the size
-     of the current pspace's cache.  */
-  if (new_size == cache->global_symbols->size)
-    return;
 
   ALL_PSPACES (pspace)
     {
       struct symbol_cache *cache
 	= program_space_data (pspace, symbol_cache_key);
 
-      resize_symbol_cache (cache, new_size);
+      /* The pspace could have been created but not have a cache yet.  */
+      if (cache != NULL)
+	resize_symbol_cache (cache, new_size);
     }
 }
 
@@ -1300,31 +1339,31 @@ static void
 set_symbol_cache_size_handler (char *args, int from_tty,
 			       struct cmd_list_element *c)
 {
-  if (symbol_cache_size > MAX_SYMBOL_CACHE_SIZE)
+  if (new_symbol_cache_size > MAX_SYMBOL_CACHE_SIZE)
     {
-      struct symbol_cache *cache
-	= program_space_data (current_program_space, symbol_cache_key);
-
       /* Restore the previous value.
-	 All caches have the same size, so we can just use the size
-	 of the current pspace's cache.  */
-      symbol_cache_size = cache->global_symbols->size;
+	 This is the value the "show" command prints.  */
+      new_symbol_cache_size = symbol_cache_size;
+
       error (_("Symbol cache size is too large, max is %u."),
 	     MAX_SYMBOL_CACHE_SIZE);
     }
+  symbol_cache_size = new_symbol_cache_size;
 
   set_symbol_cache_size (symbol_cache_size);
 }
 
 /* Lookup symbol NAME,DOMAIN in BLOCK in the symbol cache of PSPACE.
+   OBJFILE_CONTEXT is the current objfile, which may be NULL.
    The result is the symbol if found, SYMBOL_LOOKUP_FAILED if a previous lookup
    failed (and thus this one will too), or NULL if the symbol is not present
    in the cache.
-   *SLOT is set to the cache slot of the symbol, whether found or not
-   found.  */
+   *BSC_PTR, *SLOT_PTR are set to the cache and slot of the symbol, whether
+   found or not found.  */
 
 static struct symbol *
-symbol_cache_lookup (struct symbol_cache *cache, int block,
+symbol_cache_lookup (struct symbol_cache *cache,
+		     struct objfile *objfile_context, int block,
 		     const char *name, domain_enum domain,
 		     struct block_symbol_cache **bsc_ptr,
 		     struct symbol_cache_slot **slot_ptr)
@@ -1337,11 +1376,13 @@ symbol_cache_lookup (struct symbol_cache *cache, int block,
     bsc = cache->global_symbols;
   else
     bsc = cache->static_symbols;
-  hash = hash_symbol_entry (name, domain);
+
+  hash = hash_symbol_entry (objfile_context, name, domain);
   slot = bsc->symbols + hash % bsc->size;
   *bsc_ptr = bsc;
   *slot_ptr = slot;
-  if (eq_symbol_entry (slot, name, domain))
+
+  if (eq_symbol_entry (slot, objfile_context, name, domain))
     {
       if (symbol_cache_debug)
 	fprintf_unfiltered (gdb_stdlog,
@@ -1355,6 +1396,7 @@ symbol_cache_lookup (struct symbol_cache *cache, int block,
 	return SYMBOL_LOOKUP_FAILED;
       return slot->value.found;
     }
+
   if (symbol_cache_debug)
     {
       fprintf_unfiltered (gdb_stdlog,
@@ -1381,7 +1423,7 @@ symbol_cache_clear_slot (struct symbol_cache_slot *slot)
 static void
 symbol_cache_mark_found (struct block_symbol_cache *bsc,
 			 struct symbol_cache_slot *slot,
-			 struct symbol *symbol)
+			 struct objfile *objfile, struct symbol *symbol)
 {
   if (slot->state != SYMBOL_SLOT_UNUSED)
     {
@@ -1389,6 +1431,7 @@ symbol_cache_mark_found (struct block_symbol_cache *bsc,
       symbol_cache_clear_slot (slot);
     }
   slot->state = SYMBOL_SLOT_FOUND;
+  slot->objfile_context = objfile;
   slot->value.found = symbol;
 }
 
@@ -1397,6 +1440,7 @@ symbol_cache_mark_found (struct block_symbol_cache *bsc,
 static void
 symbol_cache_mark_not_found (struct block_symbol_cache *bsc,
 			     struct symbol_cache_slot *slot,
+			     struct objfile *objfile_context,
 			     const char *name, domain_enum domain)
 {
   if (slot->state != SYMBOL_SLOT_UNUSED)
@@ -1405,6 +1449,7 @@ symbol_cache_mark_not_found (struct block_symbol_cache *bsc,
       symbol_cache_clear_slot (slot);
     }
   slot->state = SYMBOL_SLOT_NOT_FOUND;
+  slot->objfile_context = objfile_context;
   slot->value.not_found.name = xstrdup (name);
   slot->value.not_found.domain = domain;
 }
@@ -1414,9 +1459,12 @@ symbol_cache_mark_not_found (struct block_symbol_cache *bsc,
 static void
 symbol_cache_flush (struct program_space *pspace)
 {
-  struct symbol_cache *cache = get_symbol_cache (pspace);
+  struct symbol_cache *cache = program_space_data (pspace, symbol_cache_key);
   int pass;
   size_t total_size;
+
+  if (cache == NULL)
+    return;
 
   /* If the cache is untouched since the last flush, early exit.
      This is important for performance during the startup of a program linked
@@ -1442,6 +1490,7 @@ symbol_cache_flush (struct program_space *pspace)
   cache->global_symbols->misses = 0;
   cache->global_symbols->collisions = 0;
   cache->static_symbols->hits = 0;
+  cache->static_symbols->misses = 0;
   cache->static_symbols->collisions = 0;
 }
 
@@ -1465,19 +1514,23 @@ symbol_cache_dump (const struct symbol_cache *cache)
 
       for (i = 0; i < bsc->size; ++i)
 	{
+	  const struct symbol_cache_slot *slot = &bsc->symbols[i];
+
 	  QUIT;
 
-	  switch (bsc->symbols[i].state)
+	  switch (slot->state)
 	    {
 	    case SYMBOL_SLOT_UNUSED:
 	      break;
 	    case SYMBOL_SLOT_NOT_FOUND:
-	      printf_filtered ("  [%-4u] = %s (not found)\n", i,
-			       bsc->symbols[i].value.not_found.name);
+	      printf_filtered ("  [%-4u] = %s, %s (not found)\n", i,
+			       host_address_to_string (slot->objfile_context),
+			       slot->value.not_found.name);
 	      break;
 	    case SYMBOL_SLOT_FOUND:
-	      printf_filtered ("  [%-4u] = %s\n", i,
-			       SYMBOL_PRINT_NAME (bsc->symbols[i].value.found));
+	      printf_filtered ("  [%-4u] = %s, %s\n", i,
+			       host_address_to_string (slot->objfile_context),
+			       SYMBOL_PRINT_NAME (slot->value.found));
 	      break;
 	    }
 	}
@@ -1493,9 +1546,20 @@ maintenance_print_symbol_cache (char *args, int from_tty)
 
   ALL_PSPACES (pspace)
     {
-      struct symbol_cache *cache = get_symbol_cache (pspace);
+      struct symbol_cache *cache;
 
-      symbol_cache_dump (cache);
+      printf_filtered (_("Symbol cache for pspace %d\n%s:\n"),
+		       pspace->num,
+		       pspace->symfile_object_file != NULL
+		       ? objfile_name (pspace->symfile_object_file)
+		       : "(no object file)");
+
+      /* If the cache hasn't been created yet, avoid creating one.  */
+      cache = program_space_data (pspace, symbol_cache_key);
+      if (cache == NULL)
+	printf_filtered (" <empty>\n");
+      else
+	symbol_cache_dump (cache);
     }
 }
 
@@ -1524,6 +1588,8 @@ symbol_cache_stats (struct symbol_cache *cache)
       const struct block_symbol_cache *bsc
 	= pass == 0 ? cache->global_symbols : cache->static_symbols;
 
+      QUIT;
+
       if (pass == 0)
 	printf_filtered ("Global block cache stats:\n");
       else
@@ -1545,15 +1611,20 @@ maintenance_print_symbol_cache_statistics (char *args, int from_tty)
 
   ALL_PSPACES (pspace)
     {
-      struct symbol_cache *cache = get_symbol_cache (pspace);
+      struct symbol_cache *cache;
 
-      QUIT;
       printf_filtered (_("Symbol cache statistics for pspace %d\n%s:\n"),
 		       pspace->num,
 		       pspace->symfile_object_file != NULL
 		       ? objfile_name (pspace->symfile_object_file)
-		       : "NULL");
-      symbol_cache_stats (cache);
+		       : "(no object file)");
+
+      /* If the cache hasn't been created yet, avoid creating one.  */
+      cache = program_space_data (pspace, symbol_cache_key);
+      if (cache == NULL)
+ 	printf_filtered (" empty, no stats available\n");
+      else
+	symbol_cache_stats (cache);
     }
 }
 
@@ -2462,7 +2533,9 @@ lookup_static_symbol (const char *name, const domain_enum domain)
   struct block_symbol_cache *bsc;
   struct symbol_cache_slot *slot;
 
-  result = symbol_cache_lookup (cache, STATIC_BLOCK, name, domain,
+  /* Lookup in STATIC_BLOCK is not current-objfile-dependent, so just pass
+     NULL for OBJFILE_CONTEXT.  */
+  result = symbol_cache_lookup (cache, NULL, STATIC_BLOCK, name, domain,
 				&bsc, &slot);
   if (result != NULL)
     {
@@ -2476,12 +2549,14 @@ lookup_static_symbol (const char *name, const domain_enum domain)
       result = lookup_symbol_in_objfile (objfile, STATIC_BLOCK, name, domain);
       if (result != NULL)
 	{
-	  symbol_cache_mark_found (bsc, slot, result);
+	  /* Still pass NULL for OBJFILE_CONTEXT here.  */
+	  symbol_cache_mark_found (bsc, slot, NULL, result);
 	  return result;
 	}
     }
 
-  symbol_cache_mark_not_found (bsc, slot, name, domain);
+  /* Still pass NULL for OBJFILE_CONTEXT here.  */
+  symbol_cache_mark_not_found (bsc, slot, NULL, name, domain);
   return NULL;
 }
 
@@ -2536,19 +2611,25 @@ lookup_global_symbol (const char *name,
   struct block_symbol_cache *bsc;
   struct symbol_cache_slot *slot;
 
-  /* Call library-specific lookup procedure.  */
   objfile = lookup_objfile_from_block (block);
-  if (objfile != NULL)
-    sym = solib_global_lookup (objfile, name, domain);
-  if (sym != NULL)
-    return sym;
 
-  sym = symbol_cache_lookup (cache, GLOBAL_BLOCK, name, domain, &bsc, &slot);
+  /* First see if we can find the symbol in the cache.
+     This works because we use the current objfile as part of the lookup.  */
+  sym = symbol_cache_lookup (cache, objfile, GLOBAL_BLOCK, name, domain,
+			     &bsc, &slot);
   if (sym != NULL)
     {
       if (sym == SYMBOL_LOOKUP_FAILED)
 	return NULL;
       return sym;
+    }
+
+  /* Call library-specific lookup procedure.  */
+  if (objfile != NULL)
+    {
+      sym = solib_global_lookup (objfile, name, domain);
+      if (sym != NULL)
+	return sym;
     }
 
   memset (&lookup_data, 0, sizeof (lookup_data));
@@ -2559,9 +2640,9 @@ lookup_global_symbol (const char *name,
      lookup_symbol_global_iterator_cb, &lookup_data, objfile);
 
   if (lookup_data.result != NULL)
-    symbol_cache_mark_found (bsc, slot, lookup_data.result);
+    symbol_cache_mark_found (bsc, slot, objfile, lookup_data.result);
   else
-    symbol_cache_mark_not_found (bsc, slot, name, domain);
+    symbol_cache_mark_not_found (bsc, slot, objfile, name, domain);
 
   return lookup_data.result;
 }
@@ -5992,7 +6073,7 @@ symbols in the symbol cache."),
 			     &setdebuglist, &showdebuglist);
 
   add_setshow_zuinteger_cmd ("symbol-cache-size", no_class,
-			     &symbol_cache_size,
+			     &new_symbol_cache_size,
 			     _("Set the size of the symbol cache."),
 			     _("Show the size of the symbol cache."), _("\
 The size of the symbol cache.\n\
